@@ -3,15 +3,21 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { assignComplaint, extendDeadline, resolveComplaint, runDeadlineCheck } from "./logic.js";
+import { assignComplaint, extendDeadline, resolveComplaint, runDeadlineCheck, mergeVisit, hasSubmitted } from "./logic.js";
+import { migrateDb } from "./migrate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, "db.json");
 const DIST_PATH = path.join(__dirname, "../dist");
+// Voice notes are stored as files here rather than inside db.json.
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+// Large enough for a visit with several downscaled photos, or the admin's
+// whole-collection saves.
+app.use(express.json({ limit: "20mb" }));
 
 function readDb() {
   const raw = fs.readFileSync(DB_PATH, "utf-8");
@@ -22,6 +28,102 @@ function writeDb(db) {
   // Pretty-printed so db.json stays readable/diffable if you peek at it.
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
 }
+
+// Bring an older db.json up to the current visit shape before serving
+// anything. The file as it was before the upgrade is kept once, named after its
+// visit schema (db.backup-v1.json, db.backup-v2.json).
+try {
+  const db = readDb();
+  const before = Math.max(1, ...(db.visits || []).map((v) => v.schema || 1));
+  if (migrateDb(db)) {
+    const backup = path.join(__dirname, `db.backup-v${before}.json`);
+    if (!fs.existsSync(backup)) fs.copyFileSync(DB_PATH, backup);
+    writeDb(db);
+    console.log(`[migrate] db.json upgraded to the current visit shape (the previous file is kept as ${path.basename(backup)})`);
+  }
+} catch (err) {
+  console.error("[migrate] failed:", err);
+}
+
+// --- Visits, one at a time -------------------------------------------------
+// The staff app saves each visit on its own, and queues the save while the
+// phone is offline, so a phone that syncs late only ever replaces its own
+// visit, never anyone else's. Each entry is submitted on its own and is then
+// locked (see mergeVisit in logic.js); once a visit is marked done, the whole
+// visit is locked.
+
+app.put("/api/visits/:id", (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== "object" || !Array.isArray(body.stops)) {
+      return res.status(400).json({ error: "A visit needs a list of stops." });
+    }
+    const db = readDb();
+    db.visits = db.visits || [];
+    const i = db.visits.findIndex((v) => v.id === req.params.id);
+    const prev = i >= 0 ? db.visits[i] : null;
+    if (prev && prev.status === "done") {
+      return res.status(409).json({ error: "This visit was already marked as done and can no longer change.", visit: prev });
+    }
+    const next = mergeVisit(prev, body, req.params.id);
+    if (i >= 0) db.visits[i] = next; else db.visits.unshift(next);
+    writeDb(db);
+    res.json(next);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to save the visit" });
+  }
+});
+
+app.delete("/api/visits/:id", (req, res) => {
+  try {
+    const db = readDb();
+    const v = (db.visits || []).find((x) => x.id === req.params.id);
+    if (!v) return res.json({ deleted: false });
+    if (v.status === "done" || hasSubmitted(v)) return res.status(409).json({ error: "A visit that is done, or has submitted entries, can't be deleted.", visit: v });
+    db.visits = db.visits.filter((x) => x.id !== req.params.id);
+    writeDb(db);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete the visit" });
+  }
+});
+
+// --- Voice notes -------------------------------------------------------------
+const AUDIO_EXT = { "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav" };
+
+app.post("/api/uploads", express.raw({ type: ["audio/*", "application/octet-stream"], limit: "25mb" }), (req, res) => {
+  try {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "The recording was empty." });
+    const type = String(req.headers["content-type"] || "").split(";")[0].trim();
+    const ext = AUDIO_EXT[type] || "bin";
+    const name = `VN-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, name), req.body);
+    res.json({ url: `/uploads/${name}` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to store the recording" });
+  }
+});
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: true }));
+
+// --- Story feed likes (a submitted story is otherwise read-only) -----------
+app.post("/api/actions/toggle-story-like", (req, res) => {
+  try {
+    const db = readDb();
+    const v = (db.visits || []).find((x) => x.id === req.body.visitId);
+    const s = v && (v.stories || []).find((x) => x.id === req.body.storyId);
+    if (!s) return res.status(404).json({ error: "Story not found" });
+    s.liked = !s.liked;
+    s.likes = Math.max(0, (s.likes || 0) + (s.liked ? 1 : -1));
+    writeDb(db);
+    res.json({ story: s });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update the story" });
+  }
+});
 
 // GET /api/:collection -> returns that array/object from db.json
 app.get("/api/:collection", (req, res) => {

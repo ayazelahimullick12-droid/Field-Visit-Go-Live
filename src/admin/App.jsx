@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import {
   X, Check, Search, Users, ShieldAlert, Building2, AlertCircle, CheckSquare, Hourglass, UserCheck, Radar,
-  Plus, Edit3, Inbox, RefreshCw, MapPin, MessageCircle, TrendingUp, CheckCircle2, ChevronDown, ChevronUp, Trash2,
+  Plus, Edit3, Inbox, RefreshCw, MapPin, MessageCircle, TrendingUp, CheckCircle2, ChevronDown, ChevronUp, Trash2, Star, Lock,
 } from "lucide-react";
 import { usePersistedCollection } from "../lib/usePersistedCollection";
 import { makeId } from "../lib/ids";
@@ -12,7 +12,9 @@ import { Kpi } from "../staff/analytics/common";
 import { DEFAULT_SETTINGS, computeCoverage } from "../lib/offices";
 import { PersonDetails } from "../lib/PersonInfo";
 import { TERMS, lower } from "../lib/terms";
+import { expandVisits, submittedComplaints, UNDEFINED_UNIT } from "../lib/visits";
 import OfficesTab from "./OfficesTab";
+import QuestionsTab from "./QuestionsTab";
 import NetworkHealth from "../staff/NetworkHealth";
 import BranchProfile from "../staff/BranchProfile";
 
@@ -39,12 +41,6 @@ async function postAction(path, body) {
 // Re-pulls a collection from the server after a server-side action mutated
 // it directly on disk (the action endpoints bypass the usual client PUT, so
 // local state needs a manual refresh to see what changed).
-async function refetch(name, setter) {
-  const res = await fetch(`${API_BASE}/${name}`);
-  if (!res.ok) return;
-  const data = await res.json();
-  setter(() => data);
-}
 
 const isOverdue = (c) => c.status === "In Progress" && c.deadline && new Date(c.deadline) < new Date();
 const URGENCY_RANK = { High: 0, Medium: 1, Low: 2 };
@@ -53,15 +49,15 @@ const URGENCY_RANK = { High: 0, Medium: 1, Low: 2 };
    MAIN APP
    ========================================================================= */
 
-const ADMIN_SESSION_KEY = "fvt-admin-session"; // stores the signed-in admin's email
+const ADMIN_SESSION_KEY = "fvt-admin-session"; // stores the signed-in admin's id
 
 export default function App() {
   const [theme, toggleTheme] = useTheme();
   const [adminUsers, , adminUsersLoaded] = usePersistedCollection("adminUsers", []);
-  const [sessionEmail] = useState(() => {
+  const [sessionId] = useState(() => {
     try { return sessionStorage.getItem(ADMIN_SESSION_KEY); } catch { return null; }
   });
-  const currentAdmin = adminUsers.find((a) => a.email.toLowerCase() === (sessionEmail || "").toLowerCase()) || null;
+  const currentAdmin = adminUsers.find((a) => a.id === sessionId) || null;
 
   const handleLogout = () => {
     try { sessionStorage.removeItem(ADMIN_SESSION_KEY); } catch { /* ignore */ }
@@ -69,7 +65,7 @@ export default function App() {
   };
 
   // Sign-in lives on the unified landing page ("/"). No valid admin session
-  // here (never logged in, or an email that no longer matches an admin
+  // here (never logged in, or an id that no longer matches an admin
   // account) bounces back there instead of showing a login form.
   useEffect(() => {
     if (!adminUsersLoaded) return;
@@ -107,30 +103,21 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
     setTimeout(() => setToast(null), 3800);
   };
 
-  const [visits, setVisits] = usePersistedCollection("visits", []);
+  const [visits, setVisits, , reloadVisits] = usePersistedCollection("visits", []);
   const [departments, setDepartments] = usePersistedCollection("departments", []);
   const [employees, setEmployees] = usePersistedCollection("employees", []);
-  const [emailLog, setEmailLog] = usePersistedCollection("emailLog", []);
+  const [emailLog, , , reloadEmailLog] = usePersistedCollection("emailLog", []);
   const [offices, setOffices] = usePersistedCollection("offices", []);
   const [settings, setSettings] = usePersistedCollection("settings", DEFAULT_SETTINGS);
 
-  const complaints = useMemo(
-    () =>
-      visits.flatMap((v) =>
-        (v.complaints || []).map((c) => ({
-          ...c,
-          visitId: v.id,
-          location: v.location,
-          visitDate: v.date,
-          visitReason: v.reason,
-          district: v.region,
-        }))
-      ),
-    [visits]
-  );
+  // Each complaint reaches the admin as soon as the field person submits it.
+  const complaints = useMemo(() => submittedComplaints(visits), [visits]);
+  // The coverage map and Branch 360° read one record per office of each visit.
+  const reportVisits = useMemo(() => expandVisits(visits), [visits]);
 
   const refreshAfterAction = async () => {
-    await Promise.all([refetch("visits", setVisits), refetch("emailLog", setEmailLog)]);
+    // read only: writing the whole list back could undo entries field staff saved meanwhile
+    await Promise.all([reloadVisits(), reloadEmailLog()]);
   };
 
   // badge on the Complaints tab: things waiting on an admin
@@ -138,7 +125,7 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
 
   // Network health / coverage lives here (admin-only for now — see src/lib/features.js)
   const target = settings?.visitTargetDays || DEFAULT_SETTINGS.visitTargetDays;
-  const coverage = useMemo(() => computeCoverage(offices, visits, target), [offices, visits, target]);
+  const coverage = useMemo(() => computeCoverage(offices, reportVisits, target), [offices, reportVisits, target]);
   const [branchKey, setBranchKey] = useState(null);
   const branchRow = branchKey ? coverage.find((o) => o.key === branchKey) : null;
   const openBranch = (office) => { setBranchKey(office.key); setTab("branch"); window.scrollTo({ top: 0 }); };
@@ -149,6 +136,7 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
     { key: "departments", label: TERMS.units, short: TERMS.units, icon: Building2 },
     { key: "employees", label: "Employees", short: "People", icon: Users },
     { key: "offices", label: "Offices", short: "Offices", icon: MapPin },
+    { key: "questions", label: "Client questions", short: "Questions", icon: Star },
     { key: "emails", label: "Sent emails", short: "Emails", icon: Inbox },
   ];
 
@@ -162,7 +150,7 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
         {tab === "queue" && (
           <ComplaintsTab complaints={complaints} departments={departments} employees={employees} showToast={showToast} onRefresh={refreshAfterAction} />
         )}
-        {tab === "network" && <NetworkHealth visits={visits} offices={offices} settings={settings} onOpenBranch={openBranch} />}
+        {tab === "network" && <NetworkHealth visits={reportVisits} offices={offices} settings={settings} onOpenBranch={openBranch} />}
         {tab === "branch" && branchRow && (
           <BranchProfile office={branchRow} coverageRows={coverage} onBack={() => setTab("network")} canRegister={false} />
         )}
@@ -170,11 +158,12 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
           <DepartmentsTab departments={departments} setDepartments={setDepartments} employees={employees} complaints={complaints} showToast={showToast} />
         )}
         {tab === "employees" && (
-          <EmployeesTab employees={employees} setEmployees={setEmployees} departments={departments} showToast={showToast} />
+          <EmployeesTab employees={employees} setEmployees={setEmployees} departments={departments} showToast={showToast} currentAdmin={currentAdmin} />
         )}
         {tab === "offices" && (
           <OfficesTab offices={offices} setOffices={setOffices} visits={visits} setVisits={setVisits} settings={settings} setSettings={setSettings} showToast={showToast} />
         )}
+        {tab === "questions" && <QuestionsTab settings={settings} setSettings={setSettings} visits={visits} showToast={showToast} />}
         {tab === "emails" && <SentEmailsTab emailLog={emailLog} />}
       </AppShell>
 
@@ -338,7 +327,7 @@ function ComplaintTable({ items, onSelect, emptyMsg, actionLabel, highlightDeadl
       <table className="ctable stack">
         <thead>
           <tr>
-            <th>ID</th><th>Branch</th><th>{TERMS.unit} / {lower(TERMS.team)}</th><th>Description</th><th>Urgency</th>
+            <th>ID</th><th>Office</th><th>{TERMS.unit} / {lower(TERMS.team)}</th><th>Description</th><th>Urgency</th>
             <th>Deadline</th><th>Assigned to</th><th style={{ textAlign: "right" }}>Action</th>
           </tr>
         </thead>
@@ -346,7 +335,7 @@ function ComplaintTable({ items, onSelect, emptyMsg, actionLabel, highlightDeadl
           {items.map((c) => (
             <tr key={`${c.visitId}-${c.id}`} style={{ cursor: "pointer" }} onClick={() => onSelect(c)}>
               <td data-label="ID" className="mono" style={{ fontWeight: 700 }}>{c.id}</td>
-              <td data-label="Branch"><div className="cell-main">{c.location || "—"}</div><div className="cell-sub mono">{c.visitId}</div></td>
+              <td data-label="Office"><div className="cell-main">{c.location || "—"}</div><div className="cell-sub mono">{c.visitId}</div></td>
               <td data-label={`${TERMS.unit} / ${lower(TERMS.team)}`}>
                 <div className="cell-main">{c.department || "Unassigned"}{c.source && <span className="source-badge" style={{ marginLeft: 6 }}>{c.source}</span>}</div>
                 {c.unit && <div className="cell-sub">{c.unit}</div>}
@@ -401,7 +390,8 @@ function ComplaintModal({ complaint: c, departments, employees, onClose, showToa
   const [extendDays, setExtendDays] = useState(2);
   const [busy, setBusy] = useState(false);
 
-  const isOther = c.department === "Other";
+  // "Undefined" means the field person wasn't sure which unit; the admin chooses it here
+  const isOther = c.department === UNDEFINED_UNIT || c.department === "Other";
   const fixerInDept = (id) => employees.find((e) => e.departmentId === id && (e.roles || []).includes("fixer"));
   const previewDept = isOther ? deptId : departments.find((d) => d.name === c.department)?.id;
   const previewFixer = previewDept ? fixerInDept(previewDept) : null;
@@ -463,7 +453,8 @@ function ComplaintModal({ complaint: c, departments, employees, onClose, showToa
         <div className="modal-body">
           <Journey c={c} />
 
-          <p style={{ fontSize: 14, lineHeight: 1.55, marginBottom: 16 }}>{c.description}</p>
+          <p style={{ fontSize: 14, lineHeight: 1.55, marginBottom: 16 }}>{c.description || "No written description. Listen to the voice note below."}</p>
+          {c.voice?.url && <audio controls preload="metadata" src={c.voice.url} style={{ width: "100%", marginBottom: 16 }} />}
 
           {c.photoUrl && (
             <img src={c.photoUrl} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "cover", borderRadius: 14, marginBottom: 16 }} />
@@ -472,7 +463,8 @@ function ComplaintModal({ complaint: c, departments, employees, onClose, showToa
           <div className="meta-box">
             {meta("Filed by", c.filedBy)}
             {meta("Raised by", <PersonDetails kind={c.source} person={c.person} consent={c.consent} />)}
-            {meta("Visit", <><span className="mono">{c.visitId}</span> — {c.location} · {c.visitDate}</>)}
+            {meta("Office", <>{c.location || "—"}{[c.division, c.region, c.area].filter(Boolean).length > 0 && <span style={{ color: "var(--ink-faint)" }}> · {[c.division, c.region, c.area].filter(Boolean).join(" › ")}</span>}</>)}
+            {meta("Visit", <><span className="mono">{c.visitId}</span> · {c.visitDate}{c.submittedAt ? <> · submitted {new Date(c.submittedAt).toLocaleDateString()}</> : null}</>)}
             {meta("Visit reason", c.visitReason)}
             {meta(TERMS.unit, c.department)}
             {meta(TERMS.team, c.unit)}
@@ -486,7 +478,7 @@ function ComplaintModal({ complaint: c, departments, employees, onClose, showToa
 
               {isOther ? (
                 <div className="field-group">
-                  <label className="field-label">This complaint was filed as "Other" — choose the real {lower(TERMS.unit)}</label>
+                  <label className="field-label">This complaint was filed as "{UNDEFINED_UNIT}" — choose the real {lower(TERMS.unit)}</label>
                   <select className="select" value={deptId} onChange={(e) => { setDeptId(e.target.value); setUnitName(""); }}>
                     {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
@@ -631,7 +623,7 @@ function DepartmentsTab({ departments, setDepartments, employees, complaints, sh
   return (
     <div className="page">
       <PageHead eyebrow="Configuration" title={TERMS.units}
-        desc={`Complaints are filed against a ${lower(TERMS.unit)} and one of its ${lower(TERMS.teams)}. They are routed to that ${lower(TERMS.unit)}'s single fixer — or, for "Other," to whichever ${lower(TERMS.unit)} you pick when assigning.`} />
+        desc={`Complaints are filed against a ${lower(TERMS.unit)} and one of its ${lower(TERMS.teams)}. They are routed to that ${lower(TERMS.unit)}'s single fixer — or, for "Undefined" (the filer wasn't sure), to whichever ${lower(TERMS.unit)} you pick when assigning.`} />
 
       <Reveal className="card card-pad" style={{ marginBottom: 20, maxWidth: 460 }}>
         <label className="field-label">Add a {lower(TERMS.unit)}</label>
@@ -760,10 +752,15 @@ function UnitsEditor({ dept, counts, setDepartments, showToast }) {
    TAB: EMPLOYEES
    ========================================================================= */
 
-const ROLE_OPTIONS = ["field", "fixer", "supervisor", "management"];
-const emptyEmployeeForm = () => ({ name: "", phone: "", email: "", password: "", pin: "", departmentId: "", supervisorId: "", roles: [] });
+// Four kinds of user. Base users, fixers and management sign in to the staff app
+// (an employee can be more than one, e.g. a base user who is also management);
+// admins sign in here and are listed under "Admin accounts".
+const ROLE_OPTIONS = ["field", "fixer", "management"];
+const ROLE_LABELS = { field: "Base user", fixer: "Fixer", management: "Management", supervisor: "Management" };
+const roleLabel = (r) => ROLE_LABELS[r] || r;
+const emptyEmployeeForm = () => ({ name: "", phone: "", email: "", password: "", pin: "", departmentId: "", supervisorId: "", roles: ["field"] });
 
-function EmployeesTab({ employees, setEmployees, departments, showToast }) {
+function EmployeesTab({ employees, setEmployees, departments, showToast, currentAdmin }) {
   const [form, setForm] = useState(emptyEmployeeForm());
   const [editingId, setEditingId] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -819,19 +816,21 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const supervisorOptions = employees.filter((e) => (e.roles || []).includes("supervisor"));
+  // Supervisors (who receive escalations) are management.
+  const supervisorOptions = employees.filter((e) => e.id !== editingId && ((e.roles || []).includes("management") || (e.roles || []).includes("supervisor")));
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const has = (e, r) => (e.roles || []).includes(r) || (r === "field" && !(e.roles || []).length) || (r === "management" && (e.roles || []).includes("supervisor"));
     return employees.filter((e) =>
-      (roleFilter === "all" || (e.roles || []).includes(roleFilter)) &&
+      (roleFilter === "all" || has(e, roleFilter)) &&
       (!q || `${e.name} ${e.email} ${e.phone} ${e.pin}`.toLowerCase().includes(q))
     );
   }, [employees, query, roleFilter]);
 
   return (
     <div className="page">
-      <PageHead eyebrow="Configuration" title="Employees" desc={`Add employees, assign them a ${lower(TERMS.unit)} and supervisor, and tag them with roles.`}>
+      <PageHead eyebrow="Configuration" title="Employees" desc={`Add employees, assign them a ${lower(TERMS.unit)} and supervisor, and choose what kind of user they are: Base user, Fixer or Management. Admin accounts are at the bottom.`}>
         {!formOpen && <button className="btn btn-primary btn-sm" onClick={() => setFormOpen(true)}><Plus size={14} strokeWidth={2.6} /> Add employee</button>}
       </PageHead>
 
@@ -873,24 +872,25 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
           </div>
           <div className="field-row">
             <div className="field-group">
-              <label className="field-label">Supervisor</label>
+              <label className="field-label">Supervisor <span style={{ fontWeight: 500, color: "var(--ink-faint)" }}>(from Management)</span></label>
               <select className="select" value={form.supervisorId} onChange={(e) => setForm({ ...form, supervisorId: e.target.value })}>
                 <option value="">—</option>
                 {supervisorOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div className="field-group">
-              <label className="field-label">Roles</label>
+              <label className="field-label">User type</label>
               <div className="checkbox-row">
                 {ROLE_OPTIONS.map((r) => (
                   <label key={r}>
-                    <input type="checkbox" checked={form.roles.includes(r)} onChange={() => toggleRole(r)} /> {r}
+                    <input type="checkbox" checked={form.roles.includes(r)} onChange={() => toggleRole(r)} /> {roleLabel(r)}
                   </label>
                 ))}
               </div>
               <p style={{ fontSize: 11.5, color: "var(--ink-faint)", marginTop: 8 }}>
-                Only one fixer per {lower(TERMS.unit)} — checking it here removes it from whoever had it.
-                "management" adds the Network health dashboard to their staff app, on top of whatever else they can already do.
+                <b>Base user</b>: registers visits and records complaints, client interactions, observations and stories.
+                {" "}<b>Fixer</b>: also gets a queue of complaints to resolve; only one fixer per {lower(TERMS.unit)}, so ticking it here takes it from whoever had it.
+                {" "}<b>Management</b>: also gets the Details tab (the management view) and can be picked as a supervisor, who receives escalations.
               </p>
             </div>
           </div>
@@ -908,7 +908,7 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
         </div>
         <div className="filter-chips">
           {["all", ...ROLE_OPTIONS].map((r) => (
-            <button key={r} className={`filter-chip ${roleFilter === r ? "active" : ""}`} onClick={() => setRoleFilter(r)} style={{ textTransform: "capitalize" }}>{r === "all" ? "Everyone" : r}</button>
+            <button key={r} className={`filter-chip ${roleFilter === r ? "active" : ""}`} onClick={() => setRoleFilter(r)}>{r === "all" ? "Everyone" : roleLabel(r)}</button>
           ))}
         </div>
       </div>
@@ -916,7 +916,7 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
       <div className="ctable-wrap">
         <table className="ctable stack">
           <thead>
-            <tr><th>Name</th><th>Roles</th><th>{TERMS.unit}</th><th>Supervisor</th><th>Email</th><th style={{ textAlign: "right" }}>Action</th></tr>
+            <tr><th>Name</th><th>User type</th><th>{TERMS.unit}</th><th>Supervisor</th><th>Email</th><th style={{ textAlign: "right" }}>Action</th></tr>
           </thead>
           <tbody>
             {rows.map((e) => {
@@ -925,7 +925,7 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
               return (
                 <tr key={e.id}>
                   <td data-label="Name"><div className="cell-main">{e.name}</div>{e.phone && <div className="cell-sub">{e.phone}</div>}</td>
-                  <td data-label="Roles"><div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "inherit" }}>{(e.roles || []).map((r) => <span key={r} className="role-badge">{r}</span>)}</div></td>
+                  <td data-label="User type"><div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "inherit" }}>{((e.roles || []).length ? [...new Set(e.roles.map(roleLabel))] : [roleLabel("field")]).map((r) => <span key={r} className="role-badge">{r}</span>)}</div></td>
                   <td data-label={TERMS.unit}>{dept?.name || "—"}</td>
                   <td data-label="Supervisor">{sup?.name || "—"}</td>
                   <td data-label="Email" className="mono" style={{ fontSize: 12 }}>{e.email || "—"}</td>
@@ -938,6 +938,85 @@ function EmployeesTab({ employees, setEmployees, departments, showToast }) {
           </tbody>
         </table>
         {rows.length === 0 && <div className="empty-state">No employees match.</div>}
+      </div>
+
+      <AdminAccounts currentAdmin={currentAdmin} showToast={showToast} />
+    </div>
+  );
+}
+
+/* The fourth kind of user: admins, who sign in to this console with a PIN and password. */
+const emptyAdminForm = () => ({ name: "", email: "", pin: "", password: "" });
+
+function AdminAccounts({ currentAdmin, showToast }) {
+  const [admins, setAdmins] = usePersistedCollection("adminUsers", []);
+  const [form, setForm] = useState(null); // null | { id?, ...fields }
+  const [sureId, setSureId] = useState(null);
+
+  const save = () => {
+    const f = { name: form.name.trim(), email: form.email.trim(), pin: form.pin.trim(), password: form.password };
+    if (!f.name || !f.pin || !f.password) { showToast("Name, PIN and password are needed."); return; }
+    if (!/^\d{4,8}$/.test(f.pin)) { showToast("The PIN should be 4 to 8 digits."); return; }
+    if (admins.some((a) => a.pin === f.pin && a.id !== form.id)) { showToast("Another admin already uses that PIN."); return; }
+    if (form.id) setAdmins((list) => list.map((a) => (a.id === form.id ? { ...a, ...f } : a)));
+    else setAdmins((list) => [...list, { id: makeId("ADM"), ...f }]);
+    showToast(`${f.name} ${form.id ? "updated" : "added as an admin"}.`);
+    setForm(null);
+  };
+  const remove = (a) => {
+    if (sureId !== a.id) { setSureId(a.id); return; }
+    setAdmins((list) => list.filter((x) => x.id !== a.id));
+    setSureId(null);
+    showToast(`${a.name} can no longer sign in as an admin.`);
+  };
+
+  return (
+    <div style={{ marginTop: 34 }}>
+      <div className="section-header">
+        <div className="section-title"><ShieldAlert size={17} /> Admin accounts <span className="badge-count">{admins.length}</span></div>
+        {!form && <button className="btn btn-secondary btn-sm" onClick={() => setForm(emptyAdminForm())}><Plus size={14} /> Add admin</button>}
+      </div>
+      <p className="h-desc" style={{ marginTop: -6, marginBottom: 14 }}>Admins sign in to this console with their PIN and password. They don't use the staff app.</p>
+
+      {form && (
+        <div className="card card-pad page-enter" style={{ marginBottom: 16 }}>
+          <p className="field-label">{form.id ? "Edit admin" : "Add admin"}</p>
+          <div className="field-row">
+            <div className="field-group"><label className="field-label">Name</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div className="field-group"><label className="field-label">Email</label><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+          </div>
+          <div className="field-row">
+            <div className="field-group"><label className="field-label">Admin PIN</label><input className="input" inputMode="numeric" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} /></div>
+            <div className="field-group"><label className="field-label">Password</label><input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-primary" onClick={save}>{form.id ? "Save changes" : "Add admin"}</button>
+            <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="ctable-wrap">
+        <table className="ctable stack">
+          <thead><tr><th>Name</th><th>PIN</th><th>Email</th><th style={{ textAlign: "right" }}>Action</th></tr></thead>
+          <tbody>
+            {admins.map((a) => (
+              <tr key={a.id}>
+                <td data-label="Name"><div className="cell-main">{a.name}{a.id === currentAdmin?.id && <span className="role-badge" style={{ marginLeft: 6 }}>You</span>}</div></td>
+                <td data-label="PIN" className="mono">{a.pin}</td>
+                <td data-label="Email" className="mono" style={{ fontSize: 12 }}>{a.email || "—"}</td>
+                <td data-label="" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setSureId(null); setForm({ id: a.id, name: a.name || "", email: a.email || "", pin: a.pin || "", password: a.password || "" }); }}><Edit3 size={12} /> Edit</button>
+                  {a.id !== currentAdmin?.id && (
+                    <button className="btn btn-ghost btn-sm" style={{ color: "var(--danger)", marginLeft: 6 }} onClick={() => remove(a)}>
+                      <Trash2 size={12} /> {sureId === a.id ? "Tap again" : "Remove"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

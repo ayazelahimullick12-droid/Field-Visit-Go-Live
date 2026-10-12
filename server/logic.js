@@ -16,12 +16,14 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-// Every complaint, across every visit, flattened with a back-reference so
-// we can find & mutate the right visit/complaint pair.
+// Every submitted complaint, across every visit, flattened with a back-reference
+// so we can find & mutate the right visit/complaint pair. A complaint that is
+// still a draft hasn't been sent to the admin yet.
 function flattenComplaints(db) {
   const out = [];
   (db.visits || []).forEach((v) => {
     (v.complaints || []).forEach((c) => {
+      if (c.state === "draft") return;
       out.push({ complaint: c, visit: v });
     });
   });
@@ -75,7 +77,7 @@ function pushEmail(db, { complaintId, to, toName, type, subject, body }) {
 
 const PERSON_LABELS = {
   name: "Name", pin: "PIN", designation: "Designation", department: "Department", contact: "Contact",
-  phone: "Phone", memberNumber: "Member number", voCode: "VO code",
+  phone: "Phone", memberNumber: "Member number", voCode: "VO code", branchCode: "Branch code", projectCode: "Project code",
 };
 
 // "Raised by (member): Name: …, Phone: …" — only the details that were given.
@@ -96,9 +98,55 @@ function complaintDetailBlock(complaint, visit) {
     `Filed by: ${complaint.filedBy} (${complaint.source})`,
     ...(raisedByLine(complaint) ? [raisedByLine(complaint)] : []),
     `Filed on: ${complaint.filedDate}`,
-    `Related visit: ${visit ? `${visit.location || "N/A"} on ${visit.date || "N/A"}` : complaint.visitId}`,
+    `Office: ${complaint.place?.office || complaint.branch || "N/A"}${complaint.place ? ` (${[complaint.place.division, complaint.place.region, complaint.place.area].filter(Boolean).join(" › ")})` : ""}`,
+    `Related visit: ${visit ? `${visit.id} on ${visit.date || "N/A"}` : complaint.visitId}`,
   ].join("\n");
 }
+
+// --- Saving a visit from the staff app ------------------------------------
+// Entries are drafts the field person can still change until they submit each
+// one. A submitted entry is locked: the server keeps its own copy (which may
+// carry the admin's assignment, the fixer's progress or story likes) whatever
+// the phone sends, and never lets it be removed. A newly submitted complaint
+// gets the admin-workflow fields, once, and enters the admin's queue.
+const ENTRY_LISTS = ["complaints", "interactions", "observations", "stories"];
+
+function stampEntry(list, entry, visit, now) {
+  const at = now.toISOString();
+  const out = { ...entry, state: "submitted", submittedAt: entry.submittedAt || at };
+  if (list !== "complaints" || out.status) return out;
+  return {
+    ...out,
+    status: "Open",
+    filedBy: out.filedBy || visit.employeeName,
+    visitId: visit.id,
+    filedDate: at.slice(0, 10),
+    assignedTo: null,
+    supervisor: null,
+    deadline: null,
+    escalationApproved: false,
+    resolutionNotes: null,
+    log: [{ label: "Complaint submitted", time: now.toLocaleString() }],
+  };
+}
+
+/** The visit to store, given what's stored now (`prev`, or null) and what the phone sent. */
+function mergeVisit(prev, body, id) {
+  const now = new Date();
+  const next = { ...body, id, schema: 3, updatedAt: now.toISOString() };
+  ENTRY_LISTS.forEach((list) => {
+    const incoming = Array.isArray(body[list]) ? body[list] : [];
+    const locked = new Map((prev?.[list] || []).filter((e) => e.state !== "draft").map((e) => [e.id, e]));
+    const out = incoming.map((e) => locked.get(e.id) || (e.state === "submitted" ? stampEntry(list, e, next, now) : { ...e, state: "draft" }));
+    locked.forEach((e, eid) => { if (!incoming.some((x) => x.id === eid)) out.push(e); });
+    next[list] = out;
+  });
+  next.status = next.status === "done" ? "done" : "open";
+  next.doneAt = next.status === "done" ? next.doneAt || now.toISOString() : null;
+  return next;
+}
+
+const hasSubmitted = (visit) => ENTRY_LISTS.some((list) => (visit[list] || []).some((e) => e.state !== "draft"));
 
 // --- Action: assign a complaint to the department's fixer and set its deadline
 function assignComplaint(db, { visitId, complaintId, departmentId, unit, days }) {
@@ -107,7 +155,8 @@ function assignComplaint(db, { visitId, complaintId, departmentId, unit, days })
   const { complaint, visit } = found;
 
   let dept;
-  if (complaint.department === "Other" || departmentId) {
+  // "Undefined" (formerly "Other") means the filer wasn't sure — the admin picks the real unit
+  if (complaint.department === "Undefined" || complaint.department === "Other" || departmentId) {
     dept = findDeptByIdOrName(db, departmentId);
     if (!dept) throw new Error("A valid unit must be chosen for this complaint");
   } else {
@@ -126,7 +175,7 @@ function assignComplaint(db, { visitId, complaintId, departmentId, unit, days })
   const setAt = new Date();
   const deadline = new Date(setAt.getTime() + daysNum * DAY);
 
-  // A complaint filed as "Other" has no team; the admin may pick one when re-routing it.
+  // A complaint filed as "Undefined" has no team; the admin may pick one when re-routing it.
   // Otherwise the team chosen when it was filed is kept, as long as it still belongs to the unit.
   // (Stored as complaint.department = the Unit, complaint.unit = the Team — see src/lib/terms.js.)
   const wantedUnit = unit || complaint.unit;
@@ -290,4 +339,4 @@ function runDeadlineCheck(db) {
   return generated;
 }
 
-export { assignComplaint, extendDeadline, resolveComplaint, runDeadlineCheck };
+export { assignComplaint, extendDeadline, resolveComplaint, runDeadlineCheck, mergeVisit, hasSubmitted };

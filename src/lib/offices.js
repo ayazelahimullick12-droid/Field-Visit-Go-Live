@@ -56,29 +56,44 @@ export function buildLocationTree(offices) {
 const avg = (arr) => (arr.length ? arr.reduce((s, r) => s + r, 0) / arr.length : null);
 export const average = avg;
 
-/** Five equally-weighted checks on how fully a visit's information was captured. */
+/** Five equally-weighted checks on how fully the information at one office of a visit was captured.
+ *  Works on the per-office records from expandVisits() (src/lib/visits.js). */
 export function visitChecks(v) {
-  const f = v.feedback || {};
+  const obs = v.observations || [];
+  const talks = v.interactions || [];
+  const complaints = v.complaints || [];
+  const said = (e) => String(e.description || "").trim() !== "" || !!e.voice;
   const checks = {
-    registered: !!(v.location && v.date && v.reason && v.steps?.register),
-    staffRated: (f.staff?.rating || 0) > 0,
-    memberRated: (f.member?.rating || 0) > 0 && Number(f.member?.count) > 0,
-    complaintsDone: !!v.steps?.complaints,
-    detail: ((f.staff?.tags?.length || 0) + (f.member?.tags?.length || 0) > 0) || !!(f.staff?.notes || f.member?.notes),
+    registered: !!(v.location && v.date && v.reason),
+    observed: obs.length > 0,
+    clientRated: talks.some((o) => (o.ratings || []).some((r) => r.stars > 0)),
+    covered: obs.length + talks.length + complaints.length + (v.stories || []).length > 0,
+    detail: [...obs, ...talks, ...complaints].some((e) => said(e) || !!e.photoUrl),
   };
   const passed = Object.values(checks).filter(Boolean).length;
   return { checks, score: passed / 5 };
 }
 export const CHECK_LABELS = {
   registered: "Visit registered",
-  staffRated: "Staff feedback rated",
-  memberRated: "Member feedback + members consulted",
-  complaintsDone: "Complaints step completed",
-  detail: "Tags or notes captured",
+  observed: "Observation recorded",
+  clientRated: "Client interaction rated",
+  covered: "Something recorded at this office",
+  detail: "Descriptions, photos or voice notes captured",
 };
 
+/** Star ratings at one office: one average per client interaction. Observations have no stars. */
 export function visitRatings(v) {
-  return [v.feedback?.staff?.rating, v.feedback?.member?.rating].filter((r) => typeof r === "number" && r > 0);
+  return (v.interactions || [])
+    .map((o) => {
+      const stars = (o.ratings || []).map((r) => r.stars).filter((n) => n > 0);
+      return stars.length ? stars.reduce((s, n) => s + n, 0) / stars.length : null;
+    })
+    .filter((r) => r != null);
+}
+
+/** Clients heard at one office: each client interaction counts once (older entries kept a "members consulted" count). */
+export function clientsHeard(v) {
+  return (v.interactions || []).reduce((s, o) => s + (Number(o.consulted) > 0 ? Number(o.consulted) : 1), 0);
 }
 
 /** One row per active office, with its visit recency and health signals. */

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { MapPin, ShieldAlert, User, Mail, Lock, LogIn } from "lucide-react";
+import { MapPin, ShieldAlert, User, Hash, Lock, LogIn } from "lucide-react";
 import { usePersistedCollection } from "../lib/usePersistedCollection";
 import { useTheme } from "../lib/theme";
 import ThemeToggle from "../lib/ThemeToggle";
@@ -9,7 +9,7 @@ import BdOutline from "../lib/BdOutline";
 // Session keys — kept identical to what the staff and admin apps read, so
 // signing in here and landing on staff.html / admin.html needs no re-login.
 const STAFF_SESSION_KEY = "fvt-staff-session"; // employee id, localStorage
-const ADMIN_SESSION_KEY = "fvt-admin-session"; // admin email, sessionStorage
+const ADMIN_SESSION_KEY = "fvt-admin-session"; // admin id, sessionStorage
 
 // Major cities, [lng, lat] — decorative pins on the sign-in map.
 const CITY_PINS = [[90.41, 23.81], [91.78, 22.36], [91.87, 24.89], [88.6, 24.37], [89.54, 22.85], [89.27, 25.74], [90.35, 22.7], [90.42, 24.75], [92.0, 21.43]];
@@ -24,15 +24,15 @@ export default function App() {
   const existingStaffSessionId = (() => {
     try { return localStorage.getItem(STAFF_SESSION_KEY); } catch { return null; }
   })();
-  const existingAdminSessionEmail = (() => {
+  const existingAdminSessionId = (() => {
     try { return sessionStorage.getItem(ADMIN_SESSION_KEY); } catch { return null; }
   })();
 
   const staffMatch = existingStaffSessionId && employeesLoaded
     ? employees.find((e) => e.id === existingStaffSessionId)
     : undefined;
-  const adminMatch = existingAdminSessionEmail && adminUsersLoaded
-    ? adminUsers.find((a) => a.email.toLowerCase() === existingAdminSessionEmail.toLowerCase())
+  const adminMatch = existingAdminSessionId && adminUsersLoaded
+    ? adminUsers.find((a) => a.id === existingAdminSessionId)
     : undefined;
 
   // Already signed in somewhere? Skip the login screen entirely.
@@ -46,7 +46,7 @@ export default function App() {
   // might still turn out to be valid — either the collection hasn't loaded
   // yet, or it has and the redirect above is about to fire.
   const waitingOnStaffSession = existingStaffSessionId && (!employeesLoaded || staffMatch);
-  const waitingOnAdminSession = existingAdminSessionEmail && (!adminUsersLoaded || adminMatch);
+  const waitingOnAdminSession = existingAdminSessionId && (!adminUsersLoaded || adminMatch);
   if (waitingOnStaffSession || waitingOnAdminSession) {
     return (
       <div className="fvt">
@@ -67,7 +67,7 @@ export default function App() {
   };
 
   const handleAdminLogin = (admin) => {
-    try { sessionStorage.setItem(ADMIN_SESSION_KEY, admin.email); } catch { /* ignore */ }
+    try { sessionStorage.setItem(ADMIN_SESSION_KEY, admin.id); } catch { /* ignore */ }
     window.location.href = "/admin.html";
   };
 
@@ -108,8 +108,7 @@ export default function App() {
                   icon={<MapPin size={22} />}
                   title="Welcome back"
                   subtitle="Sign in to log and review field visits"
-                  demoHint="Demo: PIN 1234 + password password123 (or email ayaz.elahi@brac.org)"
-                  footerExtra={<SsoSection />}
+                  demoHint="Demo: Base user 1234 / password123 · Fixer 3001 / fixer123 · Management 7001 / mgmt123"
                 />
               ) : (
                 <AdminLoginCard adminUsers={adminUsers} onLogin={handleAdminLogin} />
@@ -122,40 +121,20 @@ export default function App() {
   );
 }
 
-function SsoSection() {
-  const [clicked, setClicked] = useState(false);
-  return (
-    <>
-      <div className="sso-divider">or</div>
-      <button className="btn btn-secondary btn-block" onClick={() => setClicked(true)}>
-        Continue with SSO
-      </button>
-      {clicked && (
-        <p className="sso-note">
-          SSO isn't wired up yet — this button is a placeholder for a future
-          single sign-on integration. Sign in above with a PIN or email and
-          password for now.
-        </p>
-      )}
-    </>
-  );
-}
-
+// Admins sign in the same way as everyone else: PIN and password.
 function AdminLoginCard({ adminUsers, onLogin }) {
-  const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const handleLogin = () => {
-    if (!email.trim() || !password.trim()) {
-      setError("Enter the admin email and password.");
+    if (!pin.trim() || !password.trim()) {
+      setError("Enter your admin PIN and password.");
       return;
     }
-    const match = adminUsers.find(
-      (a) => a.email.toLowerCase() === email.trim().toLowerCase() && a.password === password
-    );
+    const match = adminUsers.find((a) => a.pin === pin.trim() && a.password === password);
     if (!match) {
-      setError("Incorrect admin email or password.");
+      setError("No admin account matches that PIN and password.");
       return;
     }
     onLogin(match);
@@ -168,18 +147,18 @@ function AdminLoginCard({ adminUsers, onLogin }) {
       <p className="login-sub">Complaints, employees, offices and settings</p>
 
       <div className="field-group">
-        <label className="field-label">Email</label>
+        <label className="field-label" htmlFor="admin-pin">Admin PIN</label>
         <div className="login-input-wrap">
-          <Mail size={16} className="login-input-icon" />
-          <input className="input login-input" type="email" placeholder="admin@brac.org" autoComplete="username"
-                 value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Hash size={16} className="login-input-icon" />
+          <input id="admin-pin" className="input login-input" type="password" inputMode="numeric" placeholder="4–8 digits" autoComplete="username"
+                 value={pin} onChange={(e) => setPin(e.target.value)} />
         </div>
       </div>
       <div className="field-group">
-        <label className="field-label">Password</label>
+        <label className="field-label" htmlFor="admin-password">Password</label>
         <div className="login-input-wrap">
           <Lock size={16} className="login-input-icon" />
-          <input className="input login-input" type="password" placeholder="Password" autoComplete="current-password"
+          <input id="admin-password" className="input login-input" type="password" placeholder="Password" autoComplete="current-password"
                  value={password} onChange={(e) => setPassword(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && handleLogin()} />
         </div>
@@ -190,9 +169,7 @@ function AdminLoginCard({ adminUsers, onLogin }) {
       <button className="btn btn-primary btn-block btn-lg" style={{ marginTop: 20 }} onClick={handleLogin}>
         <LogIn size={16} /> Sign in
       </button>
-      <p className="login-footer">Demo: admin@brac.org / admin123</p>
-
-      <SsoSection />
+      <p className="login-footer">Demo: PIN 9001 / admin123</p>
     </div>
   );
 }

@@ -8,10 +8,12 @@ import { FEATURES } from "../lib/features";
 import VisitsView from "./analytics/VisitsView";
 import ComplaintsView from "./analytics/ComplaintsView";
 
-/** Dashboard "Management view": visit + complaint analytics. (Coverage and network health live in their own tab.) */
-export default function Analytics({ visits, offices, departments, settings, onOpenBranch }) {
+/** The management view: visit + complaint analytics, on management's "Details" page.
+ *  (Coverage and network health live in their own tab.) As a page the headline numbers
+ *  and the full analytics show together; elsewhere it starts as just the numbers. */
+export default function Analytics({ visits, offices, departments, settings, onOpenBranch, asPage = false }) {
   const target = settings?.visitTargetDays || 90;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(asPage);
   const [tab, setTab] = useState("visits"); // visits | complaints
   const [loc, setLoc] = useState(EMPTY_LOCATION_FILTER);
   const [date, setDate] = useState(EMPTY_DATE_FILTER);
@@ -23,15 +25,17 @@ export default function Analytics({ visits, offices, departments, settings, onOp
 
   return (
     <div className="analytics-block">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-        <p className="h-eyebrow" style={{ margin: 0, fontSize: 12 }}>Management view</p>
-        <button className="btn btn-ghost btn-sm" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
-          {expanded ? <>Show less <ChevronUp size={14} /></> : <>Show details <ChevronDown size={14} /></>}
-        </button>
-      </div>
+      {!asPage && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+          <p className="h-eyebrow" style={{ margin: 0, fontSize: 12 }}>Management view</p>
+          <button className="btn btn-ghost btn-sm" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
+            {expanded ? <>Show less <ChevronUp size={14} /></> : <>Show details <ChevronDown size={14} /></>}
+          </button>
+        </div>
+      )}
 
-      {!expanded && (
-        <div className="kpi-grid">
+      {(asPage || !expanded) && (
+        <div className="kpi-grid" style={asPage ? { marginBottom: 22 } : undefined}>
           <Reveal i={0}><Kpi icon={MapPin} label="Visits on record" value={real.length} spark={health.visitsSpark} sparkColor="var(--brand)" /></Reveal>
           <Reveal i={1}>
             <Kpi icon={CalendarDays} tone="blue" label="Visits this month" value={health.thisMonth}

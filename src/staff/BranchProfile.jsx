@@ -7,7 +7,7 @@ import { Kpi } from "./analytics/common";
 import BdOutline from "../lib/BdOutline";
 import bdDistricts from "../lib/bd-districts.geojson.json";
 import {
-  STATUS_META, timeAgo, average, visitChecks, visitRatings, monthBuckets, monthKeyOf, districtShapeName, MONTH_LABELS,
+  STATUS_META, timeAgo, average, visitChecks, visitRatings, clientsHeard, monthBuckets, monthKeyOf, districtShapeName, MONTH_LABELS,
 } from "../lib/offices";
 
 function MiniLocator({ office, siblings }) {
@@ -47,7 +47,7 @@ export default function BranchProfile({ office, coverageRows, onBack, onNewVisit
     () => row.visits.flatMap((v) => (v.complaints || []).map((c) => ({ ...c, visitDate: v.date }))).sort((a, b) => (b.filedDate || "").localeCompare(a.filedDate || "")),
     [row.visits]
   );
-  const members = row.visits.reduce((s, v) => s + (Number(v.feedback?.member?.count) || 0), 0);
+  const members = row.visits.reduce((s, v) => s + clientsHeard(v), 0);
   const meta = STATUS_META[row.status];
 
   return (
@@ -77,7 +77,7 @@ export default function BranchProfile({ office, coverageRows, onBack, onNewVisit
         </Reveal>
         <Reveal i={2}><Kpi icon={MessageCircle} tone={row.openComplaints ? "red" : "green"} label="Open complaints" value={row.openComplaints} foot={<span className="pill pill-brand">{row.totalComplaints} total</span>} /></Reveal>
         <Reveal i={3}><Kpi icon={ShieldCheck} tone="green" label="Info completeness" value={row.quality == null ? "—" : Math.round(row.quality * 100)} suffix={row.quality == null ? "" : "%"} /></Reveal>
-        <Reveal i={4}><Kpi icon={Users} tone="blue" label="Members consulted" value={members} /></Reveal>
+        <Reveal i={4}><Kpi icon={Users} tone="blue" label="Clients heard" value={members} /></Reveal>
       </div>
 
       <div className="bp-grid">
@@ -91,7 +91,8 @@ export default function BranchProfile({ office, coverageRows, onBack, onNewVisit
               const d = new Date(v.date);
               const q = visitChecks(v).score;
               const rs = visitRatings(v);
-              const sp = v.feedback?.staff?.person, mp = v.feedback?.member?.person;
+              const sp = (v.observations || []).find((o) => o.fromStaff && o.staff)?.staff;
+              const mp = (v.interactions || []).find((o) => o.person)?.person;
               return (
                 <div className="visit-row" key={v.id}>
                   <div className="vr-date"><div className="d">{d.getDate()}</div><div className="m">{MONTH_LABELS[d.getMonth()]} {String(d.getFullYear()).slice(2)}</div></div>
@@ -108,8 +109,8 @@ export default function BranchProfile({ office, coverageRows, onBack, onNewVisit
                     </div>
                     {(sp || mp) && (
                       <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                        {sp && <span>Staff feedback: {[sp.name, sp.designation, sp.department, sp.pin && `PIN ${sp.pin}`].filter(Boolean).join(" · ") || "details left blank"}</span>}
-                        {mp && <span>Member feedback: {[mp.name, mp.memberNumber && `No. ${mp.memberNumber}`, mp.voCode].filter(Boolean).join(" · ") || "details left blank"}</span>}
+                        {sp && <span>Staff observation: {[sp.name, sp.designation, sp.department, sp.pin && `PIN ${sp.pin}`].filter(Boolean).join(" · ") || "details left blank"}</span>}
+                        {mp && <span>Client interaction: {[mp.name, mp.memberNumber && `No. ${mp.memberNumber}`, mp.voCode].filter(Boolean).join(" · ") || "details left blank"}</span>}
                       </div>
                     )}
                   </div>

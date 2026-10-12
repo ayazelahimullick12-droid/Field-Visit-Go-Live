@@ -1,7 +1,7 @@
 import React, { useId } from "react";
 
-/* Optional "who is this?" details, captured for feedback and for complaints and
-   shown to fixers and admins. Staff and members have different identifiers, but
+/* Optional "who is this?" details, captured for client interactions, observations
+   from staff and complaints, and shown to fixers and admins. Staff and members have different identifiers, but
    the same shape is used everywhere: a plain { key: value } object that only
    holds the fields that were actually filled in. */
 
@@ -18,6 +18,8 @@ export const PERSON_FIELDS = {
     { key: "phone", label: "Phone", inputMode: "tel" },
     { key: "memberNumber", label: "Member number" },
     { key: "voCode", label: "VO code" },
+    { key: "branchCode", label: "Branch code" },
+    { key: "projectCode", label: "Project code" },
   ],
 };
 
@@ -27,7 +29,7 @@ export const compactPerson = (p) => Object.fromEntries(Object.entries(p || {}).f
 export const hasPerson = (p) => Object.keys(compactPerson(p)).length > 0;
 
 /** The inputs. Every field is optional. `departments` only feeds the staff Department suggestions. */
-export function PersonFields({ kind, value, onChange, departments = [], title = "Who is giving this feedback?" }) {
+export function PersonFields({ kind, value, onChange, departments = [], title = "Who is this?" }) {
   const k = kindOf(kind);
   const listId = useId();
   const fields = PERSON_FIELDS[k];
@@ -49,10 +51,11 @@ export function PersonFields({ kind, value, onChange, departments = [], title = 
 }
 
 function PersonInput({ f, value, onChange, listId }) {
+  const id = useId();
   return (
     <div className="field-group">
-      <label className="field-label">{f.label}</label>
-      <input className="input" autoComplete="off" inputMode={f.inputMode} list={listId} value={value} onChange={(e) => onChange(e.target.value)} />
+      <label className="field-label" htmlFor={id}>{f.label}</label>
+      <input id={id} className="input" autoComplete="off" inputMode={f.inputMode} list={listId} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }

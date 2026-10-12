@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// The API server's port in development (set API_PORT if 4000 is taken by something else).
+const API = `http://localhost:${process.env.API_PORT || 4000}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -11,7 +13,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:4000",
+        target: API,
+        changeOrigin: true,
+      },
+      // voice notes are served by the API server too
+      "/uploads": {
+        target: API,
         changeOrigin: true,
       },
     },

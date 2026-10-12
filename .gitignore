@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .DS_Store
+# voice notes and the one-time pre-migration backup are runtime data
+server/uploads/
+server/db.backup-*.json

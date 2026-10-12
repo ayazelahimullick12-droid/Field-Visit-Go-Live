@@ -3,7 +3,7 @@ import { MapPin, Building2, Star, UserRound, Users, ShieldCheck } from "lucide-r
 import InteractiveMap from "../../lib/InteractiveMap";
 import { RankedBarChart, TrendLineChart } from "../../lib/charts";
 import { Reveal } from "../../lib/ui";
-import { average, visitChecks, visitRatings, CHECK_LABELS, monthBuckets, monthKeyOf, toShapeName } from "../../lib/offices";
+import { average, visitChecks, visitRatings, clientsHeard, CHECK_LABELS, monthBuckets, monthKeyOf, toShapeName } from "../../lib/offices";
 import { Kpi, MapPanel, LocationFilterBar, DateFilterBar, EMPTY_LOCATION_FILTER, EMPTY_DATE_FILTER, SERIES_COLORS, matchesLocation, matchesDate, drillFieldFor, DRILL_LABELS } from "./common";
 import bdDivisions from "../../lib/bd-divisions.geojson.json";
 import bdDistricts from "../../lib/bd-districts.geojson.json";
@@ -27,9 +27,9 @@ export default function VisitsView({ visits, coverage, offices, showCoverage = f
   }, [real, date]);
 
   const stats = useMemo(() => {
-    const staff = filtered.map((v) => v.feedback?.staff?.rating).filter((r) => r > 0);
-    const member = filtered.map((v) => v.feedback?.member?.rating).filter((r) => r > 0);
-    const counts = filtered.map((v) => Number(v.feedback?.member?.count)).filter((n) => n > 0);
+    // star ratings come from client interactions only; observations have none
+    const ratings = filtered.flatMap(visitRatings);
+    const staffObservations = filtered.reduce((s, v) => s + (v.observations || []).length, 0);
     const offices = new Set(filtered.map((v) => `${v.region}::${v.location}`));
     const quality = filtered.map((v) => visitChecks(v));
     const passRates = Object.keys(CHECK_LABELS).map((k) => ({
@@ -37,8 +37,8 @@ export default function VisitsView({ visits, coverage, offices, showCoverage = f
       value: quality.length ? Math.round((quality.filter((q) => q.checks[k]).length / quality.length) * 100) : 0,
     }));
     return {
-      overall: average([...staff, ...member]), staff: average(staff), member: average(member),
-      reached: counts.reduce((s, n) => s + n, 0), officesVisited: offices.size,
+      overall: average(ratings), staffObservations,
+      reached: filtered.reduce((s, v) => s + clientsHeard(v), 0), officesVisited: offices.size,
       quality: average(quality.map((q) => q.score)), passRates,
     };
   }, [filtered]);
@@ -119,9 +119,9 @@ export default function VisitsView({ visits, coverage, offices, showCoverage = f
       <div className="kpi-grid" style={{ marginBottom: 16 }}>
         <Reveal i={0}><Kpi icon={MapPin} label="Visits in selection" value={filtered.length} /></Reveal>
         <Reveal i={1}><Kpi icon={Building2} tone="green" label={`Offices visited (of ${officesInSel})`} value={stats.officesVisited} /></Reveal>
-        <Reveal i={2}><Kpi icon={Star} tone="amber" label="Avg rating (staff + member)" value={stats.overall == null ? "—" : Number(stats.overall.toFixed(1))} decimals={1} suffix={stats.overall == null ? "" : "★"} /></Reveal>
-        <Reveal i={3}><Kpi icon={UserRound} tone="blue" label="Avg staff rating" value={fmt(stats.staff)} /></Reveal>
-        <Reveal i={4}><Kpi icon={Users} label="Members consulted" value={stats.reached} /></Reveal>
+        <Reveal i={2}><Kpi icon={Star} tone="amber" label="Avg client rating" value={stats.overall == null ? "—" : Number(stats.overall.toFixed(1))} decimals={1} suffix={stats.overall == null ? "" : "★"} /></Reveal>
+        <Reveal i={3}><Kpi icon={UserRound} tone="blue" label="Observations" value={stats.staffObservations} /></Reveal>
+        <Reveal i={4}><Kpi icon={Users} label="Clients heard" value={stats.reached} /></Reveal>
         <Reveal i={5}><Kpi icon={ShieldCheck} tone="green" label="Info completeness" value={stats.quality == null ? "—" : Math.round(stats.quality * 100)} suffix={stats.quality == null ? "" : "%"} /></Reveal>
       </div>
 
@@ -135,7 +135,7 @@ export default function VisitsView({ visits, coverage, offices, showCoverage = f
           ) : drill.ratings.length === 0 ? (
             <>
               <p className="analytics-card-title">Avg rating by {DRILL_LABELS[field].toLowerCase()}</p>
-              <p className="analytics-card-sub">No feedback ratings in this selection yet.</p>
+              <p className="analytics-card-sub">No client ratings in this selection yet.</p>
             </>
           ) : (
             <>

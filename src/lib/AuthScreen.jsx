@@ -4,9 +4,8 @@ import { makeId } from "./ids";
 
 /**
  * Shared identity screen for the Staff and Fixer apps. Every employee is
- * tracked by a unique PIN (their id, effectively) and can sign in either
- * with just that PIN, or with their email + password — both resolve to the
- * same underlying employee record.
+ * tracked by a unique PIN (their id, effectively) and signs in with that PIN
+ * and their password. PIN + password is the only way in.
  *
  * Props:
  * - employees: the shared "employees" collection
@@ -22,7 +21,6 @@ export default function AuthScreen({
   employees, onRegister, onLogin, icon, title, subtitle, requireRole, demoHint, footerExtra, embedded,
 }) {
   const [mode, setMode] = useState("login"); // "login" | "register"
-  const [loginMethod, setLoginMethod] = useState("pin"); // "pin" | "password"
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -37,7 +35,6 @@ export default function AuthScreen({
     setPassword(""); setConfirmPassword(""); setError("");
   };
   const switchMode = (m) => { setMode(m); resetFields(); };
-  const switchLoginMethod = (m) => { setLoginMethod(m); setError(""); };
 
   const roleLabel = requireRole ? requireRole : "employee";
 
@@ -54,17 +51,6 @@ export default function AuthScreen({
     if (!pin.trim() || !password.trim()) { setError("Enter your PIN and password."); return; }
     const match = employees.find((e) => e.pin === pin.trim() && e.password === password);
     if (!match) { setError("No account matches that PIN and password."); return; }
-    if (rejectIfWrongRole(match)) return;
-    onLogin(match);
-  };
-
-  const handleLoginByPassword = () => {
-    setError("");
-    if (!email.trim() || !password.trim()) { setError("Enter your email and password."); return; }
-    const match = employees.find(
-      (e) => (e.email || "").toLowerCase() === email.trim().toLowerCase() && e.password === password
-    );
-    if (!match) { setError("No account matches that email and password."); return; }
     if (rejectIfWrongRole(match)) return;
     onLogin(match);
   };
@@ -118,57 +104,27 @@ export default function AuthScreen({
 
         {mode === "login" ? (
           <>
-            <div className="auth-subtabs">
-              <button className={`auth-subtab ${loginMethod === "pin" ? "active" : ""}`} onClick={() => switchLoginMethod("pin")}>PIN &amp; Password</button>
-              <button className={`auth-subtab ${loginMethod === "password" ? "active" : ""}`} onClick={() => switchLoginMethod("password")}>Email &amp; Password</button>
+            <div className="field-group">
+              <label className="field-label" htmlFor="login-pin">Employee PIN</label>
+              <div className="login-input-wrap">
+                <Hash size={15} className="login-input-icon" />
+                <input id="login-pin" className="input login-input" type="password" inputMode="numeric" autoComplete="username" placeholder="4–8 digits"
+                       value={pin} onChange={(e) => setPin(e.target.value)} />
+              </div>
             </div>
-
-            {loginMethod === "pin" ? (
-              <>
-                <div className="field-group">
-                  <label className="field-label">Employee PIN</label>
-                  <div className="login-input-wrap">
-                    <Hash size={15} className="login-input-icon" />
-                    <input className="input login-input" type="password" inputMode="numeric" placeholder="4–8 digits"
-                           value={pin} onChange={(e) => setPin(e.target.value)} />
-                  </div>
-                </div>
-                <div className="field-group">
-                  <label className="field-label">Password</label>
-                  <div className="login-input-wrap">
-                    <Lock size={15} className="login-input-icon" />
-                    <input className="input login-input" type="password" placeholder="Password"
-                           value={password} onChange={(e) => setPassword(e.target.value)}
-                           onKeyDown={(e) => e.key === "Enter" && handleLoginByPin()} />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="field-group">
-                  <label className="field-label">Email</label>
-                  <div className="login-input-wrap">
-                    <Mail size={15} className="login-input-icon" />
-                    <input className="input login-input" type="email" placeholder="you@brac.org"
-                           value={email} onChange={(e) => setEmail(e.target.value)} />
-                  </div>
-                </div>
-                <div className="field-group">
-                  <label className="field-label">Password</label>
-                  <div className="login-input-wrap">
-                    <Lock size={15} className="login-input-icon" />
-                    <input className="input login-input" type="password" placeholder="Password"
-                           value={password} onChange={(e) => setPassword(e.target.value)}
-                           onKeyDown={(e) => e.key === "Enter" && handleLoginByPassword()} />
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="field-group">
+              <label className="field-label" htmlFor="login-password">Password</label>
+              <div className="login-input-wrap">
+                <Lock size={15} className="login-input-icon" />
+                <input id="login-password" className="input login-input" type="password" autoComplete="current-password" placeholder="Password"
+                       value={password} onChange={(e) => setPassword(e.target.value)}
+                       onKeyDown={(e) => e.key === "Enter" && handleLoginByPin()} />
+              </div>
+            </div>
 
             {error && <div className="login-error">{error}</div>}
 
-            <button className="btn btn-primary btn-block" style={{ marginTop: 18 }}
-                    onClick={loginMethod === "pin" ? handleLoginByPin : handleLoginByPassword}>
+            <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} onClick={handleLoginByPin}>
               <LogIn size={15} /> Sign in
             </button>
           </>
@@ -205,7 +161,7 @@ export default function AuthScreen({
                 <input className="input login-input" type="password" inputMode="numeric" placeholder="4–8 digits"
                        value={pin} onChange={(e) => setPin(e.target.value)} />
               </div>
-              <p className="field-hint">This becomes your unique employee ID — you'll use it (or your email + password) to sign in.</p>
+              <p className="field-hint">This becomes your unique employee ID — you'll sign in with it and your password.</p>
             </div>
             <div className="field-group">
               <label className="field-label">Password</label>

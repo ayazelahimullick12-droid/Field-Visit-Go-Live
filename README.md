@@ -5,18 +5,22 @@ Three React apps sharing one JSON-file "database":
 - **Landing / sign-in** — `index.html` (served at `/`) → the one login
   screen for everyone, with an **Admin / User** picker up top. This is
   where every session starts now; there's no more plain link page.
-- **Staff app** — `staff.html` → log visits, feedback, complaints (with a
-  real photo attachment), story feed (with a real photo), a "My
-  Complaints" tab, and — for anyone tagged with the `fixer` role — a
-  "Fixer Queue" tab right in the same app. Employees tagged `management`
-  additionally get a **Management view** on the dashboard (see §3a) and a
-  **Branch 360° profile** for every field office. Fixers and management
-  users are just employees with an extra role, so there's no separate
-  login for either.
+- **Staff app** — `staff.html` → register a visit (only the date is needed
+  up front), then record **complaints, client interactions, observations
+  and stories**, each tied to one office (branch, VO, area or region office),
+  each saved as a draft until it's submitted on its own, with photos and
+  voice notes (see §3c). "Mark as done" closes the visit. It keeps working
+  without signal and sends everything once the phone is back online (§6a).
+  It also has a story feed, a "My Complaints" tab, and — for **Fixers** — a
+  "Fixer Queue" tab right in the same app. **Management** users additionally
+  get a **Details** tab (the management view, §3a) and a **Branch 360°
+  profile** for every field office. Navigation is a sidebar on the left on
+  laptops and a bottom tab bar on phones.
 - **Admin console** — `admin.html` → assign complaints to each unit's
   fixer, set deadlines, see the **Network health** coverage view (admin-only
   for now), manage units & teams / employees, maintain the **field
-  office master list** and the visit target (see §3b), and a Sent Emails log.
+  office master list** and the visit target (see §3b), set the **client
+  rating questions** (§3d), and a Sent Emails log.
 
 All three share one design system (`src/styles/brac.css`, see §8) styled
 after brac.net — Helvetica Neue, brand magenta on deep forest green, pill
@@ -45,7 +49,9 @@ npm run dev
 ```
 
 This starts the API server (**http://localhost:4000**) and the Vite dev
-server (**http://localhost:5173**) together. Open:
+server (**http://localhost:5173**) together. (If port 4000 is already taken,
+run the API with `PORT=4100` and the dev server with `API_PORT=4100` so its
+proxy follows.) Open:
 
 - http://localhost:5173/ — **start here.** Sign-in page with the Admin /
   User picker; successful login forwards you to the right app.
@@ -55,43 +61,53 @@ server (**http://localhost:5173**) together. Open:
 
 ## 3. Signing in
 
-The landing page (`/`) has two tabs:
+**PIN and password is the only way to sign in**, for everyone. The landing
+page (`/`) has two tabs:
 
-- **User** — the same PIN/email + password sign-in and registration form
-  as before. Every employee is tracked by a **unique PIN** and can sign in
-  with **PIN + password**, or **email + password**. Registering asks for
-  name, phone number, email, PIN, password, and a re-typed password, all
-  required. New registrations land on this tab as a plain `field` employee.
-- **Admin** — email + password against the `adminUsers` collection (now a
-  list, not a single shared login — see §9).
+- **User** — PIN + password, plus the registration form. Every employee is
+  tracked by a **unique PIN**. Registering asks for name, phone number,
+  email, PIN, password, and a re-typed password, all required (the email is
+  still used for assignment emails to fixers). New registrations land on
+  this tab as a plain `field` employee.
+- **Admin** — admin PIN + password against the `adminUsers` collection
+  (a list, not a single shared login — see §9).
 
-Both tabs also show a **"Continue with SSO"** button. It's a placeholder:
-clicking it just explains that SSO isn't wired up yet. It's there so the
-UI already has a slot for a real SSO provider (Google/Microsoft/SAML/etc.)
-to be plugged in later without another redesign.
+Email sign-in and the SSO placeholder button have been removed.
+
+**Four kinds of user**:
+
+| User type | Signs in to | Gets |
+|---|---|---|
+| **Base user** (`field`) | staff app | register visits; record complaints, client interactions, observations, stories; story feed; My complaints |
+| **Fixer** (`fixer`) | staff app | everything a base user has, plus the **Fixer queue** (complaints assigned to them) |
+| **Management** (`management`) | staff app | everything a base user has, plus the **Details** tab (the management view) and Branch 360°; can be picked as a supervisor, who receives escalations |
+| **Admin** | admin console | complaints center, network health, units, employees, offices, client questions, emails, **admin accounts** |
+
+An employee can be more than one of base user / fixer / management (they are
+tags on the employee record, set in admin console → Employees). Admins are
+separate accounts, listed and managed under **Employees → Admin accounts**.
+The old `supervisor` tag became `management` in the data upgrade (§9a).
 
 **Demo accounts** seeded in `server/db.json`:
 
-| Role | Name | Sign in with | Password |
+| User type | Name | PIN | Password |
 |---|---|---|---|
-| Normal user | Ayaz Elahi | PIN `1234` (or `ayaz.elahi@brac.org`) | `password123` |
-| Normal user | Nusrat Jahan | PIN `6001` (or `nusrat.jahan@brac.org`) | `normal123` |
-| Normal user | Kamal Uddin | PIN `6002` (or `kamal.uddin@brac.org`) | `normal123` |
-| Fixer | Tariqul Islam (Software) | PIN `3001` (or `tariqul.islam@brac.org`) | `fixer123` |
-| Management | Farzana Akter | PIN `7001` (or `farzana.akter@brac.org`) | `mgmt123` |
-| Management | Delwar Hossain | PIN `7002` (or `delwar.hossain@brac.org`) | `mgmt123` |
-| Admin | Ayaz Elahi Mullick | `admin@brac.org` | `admin123` |
-| Admin | Rezwana Karim | `rezwana.admin@brac.org` | `admin456` |
+| Base user | Ayaz Elahi | `1234` | `password123` |
+| Base user | Nusrat Jahan | `6001` | `normal123` |
+| Fixer | Tariqul Islam (Software) | `3001` | `fixer123` |
+| Fixer | Marium Begum (Finance) | `3005` | `fixer123` |
+| Management | Farzana Akter | `7001` | `mgmt123` |
+| Management | Delwar Hossain | `7002` | `mgmt123` |
+| Admin | Ayaz Elahi Mullick | `9001` | `admin123` |
+| Admin | Rezwana Karim | `9002` | `admin456` |
 
 Fixers and management users sign in through the *same* User tab as anyone
-else — the Fixer queue tab and the Dashboard's Management view just appear
-once signed in, because those are role tags on the employee record, not
-separate accounts.
+else — their extra tabs just appear once signed in.
 
 **Staying signed in**: the staff/fixer/management session (which employee
 is active) is remembered in the browser's `localStorage`, so a page reload
 does not log you out — it re-resolves your id against the live employee
-list, so if admin changes your role/unit it takes effect without
+list, so if admin changes your user type or unit it takes effect without
 needing to log out and back in. The admin session is remembered in
 `sessionStorage` (survives a reload, clears when the tab is closed).
 Signing out from either app sends you back to `/`.
@@ -100,26 +116,25 @@ Because PINs are the tracking key, they must be **unique across every
 employee** — both the register screen and the admin console's manual
 "Add Employee" form enforce this.
 
-### 3a. Management role: Management view & Network health
+### 3a. Management: the Details tab & Network health
 
-Checking the `management` role on an employee (admin console → Employees)
-gives them a **Management view** in the staff app, on top of whatever else
-they can already do (a management user is usually still a plain `field`
-employee too, or a fixer). It is read-only and organization-wide (every
-visit and complaint on record, not just theirs). The separate **Network
-health** view (below) is **admin-only for now**.
+Management users get the normal dashboard (exactly what a base user sees)
+plus a **Details** tab in the sidebar (bottom bar on phones) — the
+management view. It is read-only and organization-wide (every submitted
+entry on record, not just theirs). The separate **Network health** view
+(below) is **admin-only for now**.
 
-**Management view** — a section on the Dashboard, after "Your visits" and
-before the "Story feed". Collapsed it shows four headline numbers (visits on
-record, visits this month, open complaints, resolution rate); **Show
-details** opens two analytics tabs:
+**Details** — four headline numbers (visits on record, visits this month,
+open complaints, resolution rate) and two analytics tabs:
 
 - **Visits** — visit density, visits and average rating by division /
   district, visits over time, the mix of visit reasons (onboarding,
   monitoring, training…) and **"Was the information gathered properly?"**
-  — each visit is scored on five equal checks (registered, staff feedback
-  rated, member feedback rated with a members-consulted count, complaints
-  step completed, tags or notes captured), so thin visits are visible.
+  — each office of a visit is scored on five equal checks (registered, an
+  observation recorded, a client interaction rated, something recorded at
+  that office, and descriptions, photos or voice notes captured), so thin
+  visits are visible. Average ratings come from client interactions only;
+  observations have no stars.
 - **Complaints** — the whole path **from visit to resolution**: a funnel
   (filed → assigned → in progress → resolved), how long open complaints have
   waited, complaints by unit, resolution ratio per unit
@@ -161,7 +176,7 @@ visits map.
 
 Clicking any office — on the map, in a list or via **Ctrl/⌘ + K** quick
 search — opens its **Branch 360° profile**: status, visit history (with the
-feedback givers' details when they were recorded), average ratings, open
+details of the client / staff member when they were recorded), average ratings, open
 complaints, information completeness and a one-click "Register a visit
 here" (admins can open the profile too, without that button). Back returns
 to whichever page you came from.
@@ -186,7 +201,7 @@ it on as many employees as should see the dashboard.
 Coverage can only be measured against a list of *all* offices, so the app
 keeps one: the `offices` collection (78 seeded branches across all 8
 divisions). It drives three things — the Division → District → Area →
-Branch dropdowns in the visit wizard, the coverage maths, and the map pins.
+Branch dropdowns when registering a visit, the coverage maths, and the map pins.
 
 In the admin console's **Offices** tab an admin can:
 
@@ -205,43 +220,103 @@ In the admin console's **Offices** tab an admin can:
   collection as `{ "visitTargetDays": 90 }`). Changing it updates the
   dashboard, map and branch profiles immediately.
 
-### 3c. Registering a visit (the wizard)
+### 3c. Registering a visit, and filling it in over time
 
-Four steps, in this order: **Register → Complaints → Story → Feedback**
-(Feedback is last, and finishing it completes the visit; any step after
-Register can be skipped and resumed later from the visit card).
+There is no step-by-step wizard. A visit is registered with only its date;
+everything else — where it is, the offices on the route, the times, where
+you're staying — can be added or changed later, and entries can be added in
+any order, on the day or on the way back.
 
-1. **Register** — Division → **Region** → Area → Branch (all driven by the
-   office master list, §3b), or an Area / Region Office or Village
-   Organisation instead; then reason, dates/times and the calculated
-   duration. (The values in the Region list are the master list's second
-   level, i.e. the same names the map and analytics call districts.)
-2. **Complaints** — see §4. The form follows this flow: **who is raising
-   it** (Staff or Member, with an optional details block — **Staff**: name,
-   PIN, designation, department, contact; **Member**: name, phone, member
-   number, VO code) → **Description** → **Urgency** → **Photo** →
-   **Assign to** (a **Unit**, then one of its **Teams**) → **Consent to
-   follow up** → **Add complaint**. Fixers and admins see the details (§4).
-3. **Story** — an optional photo and caption for the story feed.
-4. **Feedback** — from **Staff** or from a **Member**. The fields come in
-   this order: **Staff / Member information** (optional — **Staff**: name,
-   PIN, designation, department, contact; **Member**: name, phone, member
-   number, VO code) → **Members consulted** (member feedback only) →
-   **Notes / description** → **Quick tags** → **Overall rating**. Only the
-   information fields that were filled in are stored
-   (`feedback.staff.person` / `feedback.member.person`).
+1. **Register** (New visit) — the same fields as before, in the same order:
+   - **Where you're going** *(optional, can be added later)*: Division →
+     **Region** → Area (from the office master list, §3b), then the
+     branches on the route like stops on a ride (**Add another branch**; the
+     selected Area's branches are listed first, then the other areas in the
+     same Region). **Visiting an Area/Region Office or Village Organisation
+     too?** adds one of those: area offices are limited to the selected
+     Region (or Division), region offices to the selected Region / Division,
+     and VOs to those under the branches already on the route.
+   - **Reason** — choosing **Other** asks you to type the reason (required).
+   - **When** — the visiting date (the only required field), visiting time,
+     returning date and time, and the calculated duration. Times are picked
+     on a **clock face** (Material Design's time picker: tap the hour, it
+     moves on to the minutes, AM/PM beside it; tapping a minute lands on the
+     nearest 5, dragging picks any minute; the keyboard button switches to
+     typing the time).
+   - **Where you're staying** *(optional)* — hidden behind **Add where you're
+     staying**, the way a hotel is an optional part of a trip request. Pick
+     a **BRAC Learning Centre (BLC)** from the list (or type another BLC), a
+     hotel, guest house, BRAC office or other place, with check-in /
+     check-out dates and notes (room, contact). Several stays can be added.
+2. **The visit page** (open a visit from the dashboard or Visits):
+   - **Where** — the Division › Region › Area path and the planned offices,
+     shown compactly. **Change** opens the same route editor right there
+     (branches, add another branch, area/region office or VO) and saves as
+     you go.
+   - **Visit details** — when, reason, where you're staying; **Edit** opens
+     the full form (also reachable from "Add return" / "Add where you're
+     staying").
+   - **Four tiles: Complaint, Client interaction, Observation, Story** —
+     each shows how many drafts and submitted entries it has. Tap a tile to
+     see its entries (**drafts first, then submitted**); tap **+** (or **New**)
+     to add one.
+   - **Mark as done** — closes the visit (data entry for it is complete). It
+     only needs the visiting and returning dates; nothing else is required.
+     If drafts remain, you can submit the ones that are ready in the same
+     step; incomplete drafts stay on the visit unsent. A done visit is
+     read-only.
+3. **The forms** — description first (with **Record a voice note**, §5; a
+   voice note counts as the description and can be written up later), the
+   office it's about last:
+   - **Complaint**: description → urgency → photo → **Assign to** (a
+     **Unit**, then one of its **Teams**; **Undefined** when you're not
+     sure — the admin routes it) → who it's from (optional) → consent.
+   - **Client interaction**: what the client said → **1–5 stars on each
+     question the admin has set** (§3d; any can be skipped) → **Client
+     information**, always open (name, phone, member number, VO code,
+     **Branch code**, **Project code** — all optional) → optional photo.
+   - **Observation**: description → photo → **Was this observation from
+     staff?** — ticking it asks for the staff member's details (optional).
+   - **Story**: a photo and a caption for the story feed.
+   - **Which office is this about?** — every entry belongs to **one office**:
+     Division → Region → Area → Office (the region office, the area office or
+     a branch) → optionally a **VO** under that branch. It starts from what
+     the visit already has (e.g. down to the Area), and the planned offices
+     are offered as one-tap chips. The office is needed to submit.
+   Details left empty are saved as "Not mention".
+4. **Draft or submit, per entry** — anything not submitted is a **draft**:
+   **Save draft**, or just close the form (it's kept as a draft). **Submit**
+   asks **"Are you sure you want to submit?"**; a submitted entry can't be
+   edited (it opens read-only). **A complaint reaches the admin as soon as it
+   is submitted**, and client interactions, observations and stories count
+   in the analytics from then on.
 
-Leaving the wizard with a draft that has nothing in it discards that draft.
+Each visit moves through **Upcoming** (registered for a later date) →
+**In progress** → **Back, not marked done** (the returning time has passed)
+→ **Done**. Visit cards show the stage, where and when, the planned offices,
+where you're staying, the entry counts and how many drafts are unsent.
+
+### 3d. Client rating questions
+
+Admin console → **Client questions**: add, reword, reorder or switch off
+the questions clients are asked to rate. Each switched-on question gets 1–5
+stars and a client's overall rating is the average (that's what the
+analytics and Branch 360° show). A question that already has answers can
+only be switched off, not deleted, and every answer stores the wording it
+was given with, so rewording a question doesn't change old answers. Stored
+in `settings.clientRatingQuestions`.
 
 ## 4. The complaint workflow, end to end
 
-1. A field employee files a complaint during a visit (staff app), choosing
+1. A field employee records a complaint during a visit (staff app), choosing
    a **unit**, then one of its **teams** (every unit with teams requires
-   one; "Other" has none), and optionally attaching a real photo
-   (taken or picked from the device — resized client-side before it's
-   stored).
+   one; **Undefined** — for when they're not sure — has none), and
+   optionally attaching a real photo (taken or picked from the device —
+   resized client-side before it's stored) or a voice note, and the office
+   it is about. It reaches the admin's queue, as "Open", **as soon as it is
+   submitted** (not when the visit is marked done).
 2. In the admin console's **Complaints** tab, an "Open" complaint is
-   assigned: if it was filed as "Other", the admin picks the real
+   assigned: if it was filed as "Undefined", the admin picks the real
    unit (and, optionally, a team); otherwise the unit and team are already
    known. Either way, the
    admin sets how many days the assignee gets, and clicks **Confirm
@@ -272,11 +347,12 @@ Leaving the wizard with a draft that has nothing in it discards that draft.
    included in the assignment email.
 
 Units and employees (name, number, email, PIN, password, unit,
-supervisor, and role tags `field` / `fixer` / `supervisor` / `management`)
-are all managed from the admin console — no code changes needed to add
-either. An admin turns any existing employee into a fixer (or a management
-user) just by checking the role on their record; the corresponding tab
-appears the next time they load the staff app.
+supervisor, and user type: Base user `field` / Fixer `fixer` / Management
+`management`) are all managed from the admin console — no code changes
+needed to add either. An admin turns any existing employee into a fixer (or
+a management user) just by ticking it on their record; the corresponding tab
+appears the next time they load the staff app. Supervisors are picked from
+Management. Admin accounts are managed in the same tab (Admin accounts).
 
 ### 4a. One fixer per unit
 
@@ -286,18 +362,49 @@ queueing between multiple people. Checking the `fixer` role on an employee
 before for that same unit, so the invariant always holds. Assigning
 a complaint always goes straight to that one person.
 
-## 5. Photos (complaints & stories)
+## 5. Photos and voice notes
 
-Photo capture is real: `<input type="file" accept="image/*" capture>` →
+**Voice notes** are recorded in the browser (`MediaRecorder`, up to 5
+minutes each) for complaints, client interactions and observations. A
+recording is kept on the phone (IndexedDB) until the visit syncs, then uploaded with `POST /api/uploads` and stored as a file in
+`server/uploads/`; the entry keeps `{ blobId, url, dur, mime }`. Browsers
+only allow the microphone on **HTTPS or localhost** — on a phone testing
+against a plain `http://192.168…` address, recording won't start. Like
+db.json, `server/uploads/` is local disk: on hosts with a temporary disk
+(e.g. Render without a persistent disk) the files are lost on redeploy.
+
+**Photo** capture is real: `<input type="file" accept="image/*" capture>` →
 the image is drawn onto a canvas and downscaled (max ~1000px, JPEG ~72%
-quality) client-side → stored as a data URL directly on the complaint or
-story record. There's no separate file server for this prototype, so:
+quality) client-side → stored as a data URL directly on the entry, which
+also means a photo taken offline is simply part of the visit saved on the
+phone. There's no separate file server for photos, so:
 - Photos live inside `server/db.json` itself (as base64 strings) — fine
   for demoing, but will bloat that file with heavy use. Swap in real
   object storage (S3, Cloudinary, etc.) before this sees production
   traffic.
 - The resize step keeps individual photos reasonably small, but there's
   no cap on *how many* photos accumulate over time.
+
+## 6a. Working without signal
+
+Field staff often finish reports in the car on the way back, so the staff
+app keeps working offline once it has been opened online:
+
+- **Visits** are kept on the phone (IndexedDB). Every change shows at once
+  and is queued; the queue is sent when the phone is back online (and every
+  20 seconds while anything is waiting). The visit page and the dashboard
+  show **"Saved on this phone · sends when online"** until it's sent.
+  Each visit is sent on its own (`PUT /api/visits/:id`), so a phone that
+  syncs late never overwrites anyone else's visits.
+- **Reference data** (employees without passwords, units, offices,
+  settings) is copied to `localStorage` after each successful load, so you
+  stay signed in and the forms still have their lists. A device copy is
+  read-only: it is never written back to the server.
+- **The app itself** opens offline thanks to a service worker
+  (`public/sw.js`, production builds only — `npm run dev` doesn't register
+  it).
+- Things that need the server (signing in for the first time, the fixer's
+  "Mark resolved", liking a story) say so when there's no connection.
 
 ## 6. Reminders/escalations without anyone logged in
 
@@ -333,11 +440,12 @@ built from CSS variables (colour, radius, shadow, motion) with a light and a
 dark set. To re-skin the product — e.g. to the official BRAC palette or
 logo — change the variables at the top of that file (the brand mark in
 `src/lib/AppShell.jsx` is a generic pin icon; drop the official logo asset in
-there). Shared building blocks: `AppShell` (top bar + mobile bottom bar),
+there). Shared building blocks: `AppShell` (left sidebar on laptops; top bar +
+bottom tab bar on phones),
 `ui.jsx` (count-up numbers, scroll-reveal, sparkline, delta chips, progress
 ring, CSV download), `charts.jsx` (self-sizing SVG charts),
 `InteractiveMap.jsx` and `CommandPalette.jsx`. On phones: a floating bottom
-tab bar with a raised "New visit" button, modals become bottom sheets, wide
+tab bar with a raised "New visit" button, forms become bottom sheets, wide
 tables become stacked cards (add `data-label` to each `<td>` and the class
 `stack` to a `ctable`), and inputs are 16 px so iOS doesn't zoom.
 
@@ -346,14 +454,14 @@ tables become stacked cards (add `data-label` to each `<td>` and the class
 `server/db.json` collections:
 
 ```
-employees        — every person: field staff, fixers, supervisors, management
-                    (role tags can overlap — e.g. a field employee can also
-                    be a fixer, or a management user). `pin` is unique across
-                    every employee (it's the login key). { id, name, phone,
-                    pin, email, password, departmentId, supervisorId,
-                    roles: ["field"|"fixer"|"supervisor"|"management"] }
-visits           — one record per field visit; complaints are nested
-                    inside visits[].complaints[] (see below).
+employees        — every staff-app user: base users, fixers, management
+                    (the tags can overlap — e.g. a base user can also be
+                    management). `pin` is unique across every employee (it's
+                    the login key). { id, name, phone, pin, email, password,
+                    departmentId, supervisorId, roles: ["field"|"fixer"|"management"] }
+visits           — one record per visit; every complaint, client interaction,
+                    observation and story is nested in it, each tied to the
+                    office it is about (see below).
 departments      — { id, name, units: [{ id, name }] }, managed in the admin
                     console's **Units** tab (**Teams** panel). NOTE the
                     wording: the interface calls a stored *department* a
@@ -366,23 +474,60 @@ offices          — the field office master list (see §3b):
                     { id, name, type: "branch", division, district, area,
                     lat, lng, active }. A visit is linked to its office by
                     district + branch name.
-settings         — { visitTargetDays } — the "Overdue after N days" target.
-adminUsers       — [{ id, name, email, password }, ...] — admin console
-                    logins. Add more from `server/db.json` directly (there's
-                    no admin-management UI yet); each is a full admin.
+settings         — { visitTargetDays, clientRatingQuestions: [{ id, text, active }] }
+                    — the "Overdue after N days" target and the client
+                    rating questions (§3d).
+adminUsers       — [{ id, name, email, pin, password }, ...] — admin console
+                    logins (PIN + password), managed in admin console →
+                    Employees → Admin accounts; each is a full admin.
 emailLog         — every generated email (see §7).
 ```
+
+A visit:
+
+```json
+{
+  "id": "V-XXXXXX", "schema": 3, "employeeId": "...", "employeeName": "...",
+  "division": "...", "region": "...", "area": "...",          // all optional
+  "stops": [ { "kind": "branch|office|vo", "name": "Mirpur Branch", "division": "...", "region": "...", "area": "..." } ],
+  "reason": "Monitoring|…|Other", "reasonOther": "typed reason when Other",
+  "date": "2026-10-12", "visitTime": "10:30", "returnDate": "", "returnTime": "",
+  "stays": [ { "id": "SY-…", "type": "BRAC Learning Centre (BLC)|Hotel|Guest house|BRAC office|Other",
+               "name": "BLC Khulna (Khalishpur)", "checkIn": "2026-10-12", "checkOut": "2026-10-13", "notes": "" } ],
+  "status": "open|done", "doneAt": null,
+  "complaints":   [ { …see below… } ],
+  "interactions": [ { "id": "CI-…", "place": {…}, "state": "draft|submitted", "submittedAt": null,
+                      "description": "...", "voice": null,
+                      "ratings": [ { "questionId": "RQ-…", "question": "wording at the time", "stars": 4 } ],
+                      "person": { "name": "…", "branchCode": "…", "projectCode": "…" }, "photoUrl": null, "time": "..." } ],
+  "observations": [ { "id": "OB-…", "place": {…}, "state": "draft|submitted", "description": "...", "voice": null,
+                      "photoUrl": null, "fromStaff": true, "staff": { "name": "…", "pin": "…" }, "time": "..." } ],
+  "stories":      [ { "id": "ST-…", "place": {…}, "state": "draft|submitted", "caption": "...", "photoUrl": null, "likes": 0, "time": "..." } ],
+  "lastPlace": { … }                                 // the office the next new entry starts at
+}
+```
+
+Every entry's `place` is the office it is about:
+`{ "division", "region", "area", "office": "VO-142 · Mirpur Branch", "officeKind": "branch|vo|area|region", "branch": "Mirpur Branch" }`.
+
+The analytics, coverage map and Branch 360° still work in one-office
+records: `expandVisits()` (`src/lib/visits.js`) turns each visit into one
+record per office — the planned offices of done visits, plus every office
+with **submitted** entries. Drafts never reach the analytics or the admin.
 
 A complaint, nested inside its visit's `complaints` array, carries:
 
 ```json
 {
   "id": "FC-XXXXXX",
-  "department": "Construction",   // shown as the Unit
+  "place": { "office": "Dhanmondi Branch", "officeKind": "branch", "...": "..." },   // the office it is about
+  "state": "draft|submitted", "submittedAt": "...",
+  "department": "Construction",   // shown as the Unit ("Undefined" when the filer wasn't sure)
   "unit": "Civil Works",             // shown as the Team
+  "voice": null,                     // { blobId, url, dur, mime } when recorded
   "source": "staff|member",
-  "person": { "name": "…", "pin": "…" },   // optional; staff: name/pin/designation/department/contact, member: name/phone/memberNumber/voCode
-  "description": "...", "urgency": "Medium", "status": "Open|In Progress|Resolved",
+  "person": { "name": "…", "pin": "…" },   // optional; staff: name/pin/designation/department/contact, member: name/phone/memberNumber/voCode/branchCode/projectCode
+  "description": "...", "urgency": "Medium", "status": "Open|In Progress|Resolved",   // status is added on submit
   "photoUrl": null,
   "filedBy": "...", "filedDate": "...",
   "assignedEmployeeId": null, "assignedTo": null, "assignedEmployeeEmail": null,
@@ -395,17 +540,49 @@ A complaint, nested inside its visit's `complaints` array, carries:
 }
 ```
 
+### 9a. The data upgrades
+
+On start, `server/index.js` runs `server/migrate.js`, which upgrades any
+older visit, one step at a time, and changes nothing on a second run:
+
+- **Schema 1 → 2** (single location + four-step wizard → a route of stops):
+  the location becomes a one-stop route, staff/member feedback becomes
+  observations (an old member star rating is kept as an answer to "Overall
+  rating (before rating questions)"), the story becomes a story entry,
+  registered visits become submitted, and empty wizard drafts are dropped.
+- **Schema 2 → 3** (per-entry drafts, offices and "Mark as done"): submitted
+  visits become **done** and their entries **submitted**; entries of open
+  visits become **drafts**; client feedback becomes **client
+  interactions**; staff feedback becomes **observations** marked "from
+  staff" (with the staff member's details); every entry's stop becomes its
+  `place`.
+- It also renames the "Other" unit to "Undefined", seeds the client rating
+  questions, gives admin accounts a PIN, and turns the old `supervisor` tag
+  into `management`.
+
+The file as it was before each upgrade is kept once, as
+`server/db.backup-v1.json` / `server/db.backup-v2.json`.
+
 ## 10. How the persistence works
 
-`src/lib/usePersistedCollection.js` fetches a collection on mount and PUTs
-the whole array back to the server on every change (it also exposes a
+**Visits in the staff app** go through `src/lib/useVisitStore.js`: saved
+one visit at a time (`PUT /api/visits/:id`, `DELETE /api/visits/:id`) and
+queued on the phone while offline (§6a). On every save the server keeps its
+own copy of each **submitted** entry (so a late phone can't undo the
+admin's assignment, the fixer's progress or story likes, and can't delete a
+submitted entry), stamps newly submitted complaints for the admin's queue,
+and refuses any change once the visit is **done** (HTTP 409).
+
+Everything else uses `src/lib/usePersistedCollection.js`, which fetches a
+collection on mount and PUTs the whole array back to the server on every
+change (it also exposes a
 `loaded` flag as a third return value, used to avoid flashing the login
 screen while a saved session is still being resolved). The four workflow
 actions (assign / extend / resolve / run-deadline-check) are the exception
 — they're server-side business logic (`server/logic.js`) reached via
 `POST /api/actions/*`, since they have to run atomically and on a timer
 independent of any browser tab. After calling one, the app
-manually re-fetches `visits` and `emailLog` to pick up what the server
+re-reads `visits` and `emailLog` (read only, never written back) to pick up what the server
 changed.
 
 This is intentionally simple (JSON file, no real auth hashing, single
@@ -417,37 +594,49 @@ not production traffic.
 ```
 field-visit-tracker/
 ├── package.json
-├── vite.config.js          # multi-page build (index/staff/admin) + /api proxy
+├── vite.config.js          # multi-page build (index/staff/admin) + /api and /uploads proxy
 ├── index.html / staff.html / admin.html
+├── public/sw.js            # service worker: opens the app offline (production builds)
 ├── server/
-│   ├── index.js             # Express API: generic /api/:collection + /api/actions/*
-│   ├── logic.js              # complaint assignment, deadline math, email generation
+│   ├── index.js             # Express API: /api/:collection, /api/visits/:id, /api/uploads, /api/actions/*
+│   ├── logic.js              # complaint assignment, deadline math, email generation, the visit save/merge rules
+│   ├── migrate.js            # upgrades of db.json to the current visit shape (§9a)
+│   ├── uploads/              # voice notes (runtime data, not committed)
 │   └── db.json                 # the database
 └── src/
     ├── styles/brac.css       # the whole design system (tokens, components, motion, mobile)
     ├── lib/
     │   ├── usePersistedCollection.js
+    │   ├── useVisitStore.js   # the staff app's visits: per-visit saves + offline queue
+    │   ├── offline.js          # IndexedDB helpers (visit cache, queue, voice recordings)
+    │   ├── visits.js           # visit stages, entry types, drafts, offices, expandVisits() for the analytics
+    │   ├── registerSW.js
     │   ├── ids.js             # makeId(), todayStr()
     │   ├── theme.js            # dark/light mode hook (per-browser)
     │   ├── ThemeToggle.jsx
-    │   ├── AppShell.jsx        # top bar, pill tabs, mobile bottom bar (staff + admin)
-    │   ├── AuthScreen.jsx      # shared login/register (PIN+password or email+password)
+    │   ├── AppShell.jsx        # left sidebar (laptop), top bar + bottom tab bar (phone) — staff + admin
+    │   ├── Portal.jsx          # renders dialogs straight into <body>
+    │   ├── AuthScreen.jsx      # shared login/register (PIN + password)
     │   ├── ui.jsx              # CountUp, Reveal, Sparkline, DeltaChip, Ring, downloadCsv…
     │   ├── charts.jsx          # dependency-free, self-sizing SVG charts
     │   ├── InteractiveMap.jsx  # zoomable choropleth + pins + label planner (d3-geo)
     │   ├── CommandPalette.jsx  # Ctrl/⌘ + K quick search
     │   ├── BdOutline.jsx       # decorative Bangladesh outline (sign-in + hero)
     │   ├── features.js         # feature switches (e.g. who sees Network health / coverage)
-    │   ├── PersonInfo.jsx      # optional staff / member details (feedback + complaints)
+    │   ├── PersonInfo.jsx      # optional staff / client details (interactions, observations, complaints)
     │   ├── offices.js          # office tree, coverage / completeness maths, name aliases
     │   ├── bd-divisions.geojson.json  # Bangladesh's 8 divisions (see §3a)
     │   └── bd-districts.geojson.json  # Bangladesh's 64 districts, for the zoomed-in map
-    ├── landing/  (main.jsx, App.jsx)   — the "/" sign-in page: Admin/User picker, SSO placeholder
+    ├── landing/  (main.jsx, App.jsx)   — the "/" sign-in page: Admin/User picker, PIN + password
     ├── staff/    (main.jsx, App.jsx, Analytics.jsx, NetworkHealth.jsx, BranchProfile.jsx, analytics/*)
-    │             — visit wizard, dashboard (Management view for management), Network health
-    │               tab, Branch 360°, My Complaints, Fixer Queue
-    └── admin/    (main.jsx, App.jsx, OfficesTab.jsx)
-                  — complaints center, network health, units (+ teams), employees, offices, sent emails
+    │             — dashboard, Details (management), Network health tab,
+    │               Branch 360°, My Complaints, Fixer Queue
+    │   └── visits/  RegisterVisit, VisitHub (the visit page), EntrySheet (the forms + read-only view),
+    │                Places (route editor + office picker), TimePicker (clock dial), Confirm,
+    │                VisitCard, VoiceNote, PhotoUpload, SyncPill
+    └── admin/    (main.jsx, App.jsx, OfficesTab.jsx, QuestionsTab.jsx)
+                  — complaints center, network health, units (+ teams), employees (+ admin accounts),
+                    offices, client questions, sent emails
 ```
 
 ## 12. Deploying to Render
@@ -467,13 +656,11 @@ Same as before — one web service:
 - **Assign button disabled / "no fixer set up"** — that unit has no
   employee tagged with the `fixer` role yet. Add the role under the admin
   console's Employees tab (only one employee per unit can hold it).
-- **Fixer Queue tab / Network health doesn't show up** — the signed-in
-  employee doesn't have the `fixer` / `management` role checked on their
-  employee record (admin console → Employees). The Management view is on
-  the Dashboard between "Your visits" and the "Story feed". Network health
-  is in the admin console (see §3a for the switch that also shows it to
-  management).
-- **An office is missing from the wizard / map / coverage** — it isn't on
+- **Fixer queue / Details tab doesn't show up** — the signed-in employee
+  isn't ticked as Fixer / Management on their employee record (admin
+  console → Employees). Network health is in the admin console (see §3a for
+  the switch that also shows it to management).
+- **An office is missing from the visit form / map / coverage** — it isn't on
   the master list, or it was retired. Check admin console → Offices.
 - **Data you changed on disk (or via a script) reverts** — every open browser
   tab holds its own copy of each collection and writes the whole thing back
@@ -483,6 +670,15 @@ Same as before — one web service:
   render once there's a session `localStorage`/`sessionStorage` recognizes;
   sign in from `/` rather than opening those files directly.
 - **Changes don't seem to save** — check the Network tab for a failing
-  `PUT` or `POST /api/actions/*` request.
+  `PUT` or `POST /api/actions/*` request. In the staff app, a visit that
+  says "Saved on this phone · sends when online" is still queued on that
+  device; it's sent once the API server is reachable again.
+- **"Record a voice note" does nothing / says the microphone was blocked**
+  — the page must be on HTTPS or `localhost`, and the browser must be
+  allowed to use the microphone.
+- **An entry can't be changed** — it has been submitted (complaints are with
+  the admin). **A whole visit can't be changed** — it has been marked as done.
+- **A complaint isn't in the admin's queue** — it's still a draft; open it
+  from the visit and Submit it.
 - **Want a clean slate?** Stop the server and edit `server/db.json`
   directly, or reset `visits`/`emailLog` to `[]`.

@@ -7,6 +7,7 @@ import {
   DEFAULT_SETTINGS, DISTRICTS_BY_DIVISION, STATUS_META, computeCoverage, coverageSummary, officeKey,
   toShapeName, divisionLabelFromShape, districtFromShape, timeAgo,
 } from "../lib/offices";
+import { expandVisits, relinkOffice, visitsAtOffice } from "../lib/visits";
 
 /* Offices master list: the single source for the visit wizard's dropdowns, the
    coverage maths and the map. Admins add / edit / retire offices here and set
@@ -55,7 +56,7 @@ export default function OfficesTab({ offices, setOffices, visits, setVisits, set
   const [editing, setEditing] = useState(null); // null | "new" | office
   const fileRef = useRef(null);
 
-  const coverage = useMemo(() => computeCoverage(offices, visits, target), [offices, visits, target]);
+  const coverage = useMemo(() => computeCoverage(offices, expandVisits(visits), target), [offices, visits, target]);
   const covByKey = useMemo(() => Object.fromEntries(coverage.map((r) => [r.key, r])), [coverage]);
   const sum = useMemo(() => coverageSummary(coverage), [coverage]);
   const inactive = offices.filter((o) => o.active === false).length;
@@ -243,11 +244,7 @@ export default function OfficesTab({ offices, setOffices, visits, setVisits, set
             if (existing) {
               const changed = existing.name !== form.name || existing.district !== form.district || existing.area !== form.area || existing.division !== form.division;
               setOffices((os) => os.map((x) => (x.id === existing.id ? { ...x, ...form } : x)));
-              if (changed) {
-                setVisits((vs) => vs.map((v) => (v.location === existing.name && v.region === existing.district
-                  ? { ...v, location: form.name, region: form.district, area: form.area, division: form.division }
-                  : v)));
-              }
+              if (changed) setVisits((vs) => relinkOffice(vs, existing, form));
               showToast(`${form.name} updated${changed ? " — its past visits were relinked." : "."}`);
             } else {
               setOffices((os) => [...os, { id: makeId("OFF"), type: "branch", active: true, ...form }]);
@@ -275,7 +272,7 @@ function OfficeModal({ office, offices, visits, onClose, onSave, onDelete }) {
 
   const districts = districtsOf(form.division);
   const areaHints = [...new Set(offices.filter((o) => o.district === form.district).map((o) => o.area))];
-  const visitCount = office ? visits.filter((v) => v.location === office.name && v.region === office.district).length : 0;
+  const visitCount = office ? visitsAtOffice(visits, office) : 0;
   const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setError(""); };
 
   const submit = () => {
