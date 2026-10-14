@@ -1,7 +1,7 @@
 # Field Visit Tracker — Go-Live Build Specification
 
 **Audience:** an AI coding agent (or a developer) building the production version.
-**Goal:** rebuild the working prototype in this folder as a secure, deployable, production
+**Goal:** rebuild the working prototype in this repository as a secure, deployable, production
 system on **Next.js + NestJS + PostgreSQL**, keeping every behaviour, screen and rule the
 prototype has today.
 
@@ -14,7 +14,8 @@ prototype has today.
 
 ## 0. How to use this document
 
-1. The prototype is the **behavioural reference**: `Field-Visit-Tracker-redesign/Field-Visit-Tracker/`.
+1. The prototype is the **behavioural reference**: the root of the repository
+   https://github.com/ayazelahimullick12-droid/Field-Visit-Go-Live (paths below are relative to it).
    Run it (`npm install && npm run dev`, then open http://localhost:5173) and click through
    every screen before building. Its `README.md` explains the features in detail.
 2. Key prototype files to study:
@@ -37,7 +38,8 @@ prototype has today.
    | Admin console | `src/admin/*` |
    | Public summary | `src/summary/*` |
    | Seed data / current data | `server/db.json` |
-3. Build in the **phases of §16**, in order. Each phase ends with its acceptance checks passing.
+3. Follow **`BUILD_PLAN.md`** (in this repository) for the order of work, folder structure, conventions
+   and change playbooks. It supersedes §16 of this file. Each phase ends with its acceptance checks passing.
 4. Keep a `DECISIONS.md` in the new repo. Whenever you make a choice this spec leaves open,
    write it there in one line.
 
@@ -734,7 +736,7 @@ Minimum automated coverage before go-live:
 
 ---
 
-## 16. Build plan (do these phases in order)
+## 16. Build plan (summary — the detailed, authoritative plan is `BUILD_PLAN.md`)
 
 | # | Phase | Done when |
 |---|---|---|
