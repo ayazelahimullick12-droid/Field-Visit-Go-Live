@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import {
-  ArrowLeft, Plus, Route, Edit3, CalendarClock, ChevronRight, Mic, CheckCheck, BedDouble, Lock, PenLine, Clock, Image as ImageIcon,
+  ArrowLeft, Plus, Route, Edit3, Trash2, CalendarClock, ChevronRight, Mic, CheckCheck, BedDouble, Lock, PenLine, Clock, Image as ImageIcon,
 } from "lucide-react";
 import {
   ENTRY_TYPES, ENTRY_ORDER, phaseOf, entriesOf, sortEntries, countsOf, isDraft, markDoneBlocker, tripStart, tripTitle,
-  computeDuration, fmtDay, fmtDate, fmtClock, relativeDay, plural, shortName, reasonText, whenText, UNDEFINED_UNIT, mmss,
+  computeDuration, fmtDay, fmtDate, fmtClock, relativeDay, plural, shortName, reasonText, whenText, UNDEFINED_UNIT, mmss, entryPlaces, placesText,
 } from "../../lib/visits";
+import { statusOf, statusClass, complaintTitle } from "../../lib/complaints";
 import { PhasePill, TYPE_ICONS } from "./VisitCard";
 import EntrySheet, { EntryView, draftReady } from "./EntrySheet";
 import { RouteSummary } from "./Places";
@@ -14,18 +15,18 @@ import { SyncPill } from "./SyncPill";
 
 const stayRange = (s) => (s.checkIn ? `${fmtDate(s.checkIn)}${s.checkOut && s.checkOut !== s.checkIn ? ` – ${fmtDate(s.checkOut)}` : ""}` : "");
 
-function EntryRow({ e, onOpen }) {
+export function EntryRow({ e, onOpen }) {
   const draft = isDraft(e);
-  const office = e.place?.office;
+  const offices = placesText(entryPlaces(e)) || (e.type === "story" ? e.locationText : "");
   const badges = [
     draft ? <span key="s" className="pill pill-stale"><PenLine size={11} /> Draft</span> : <span key="s" className="pill pill-ok"><Lock size={11} /> Submitted</span>,
-    office && <span key="o" className="tag-badge branch">{e.place.officeKind === "branch" ? shortName(office) : office}</span>,
+    offices && <span key="o" className="tag-badge branch">{offices}</span>,
   ];
-  let text = e.type === "story" ? e.caption : e.description;
+  let text = e.type === "complaint" ? (e.title ? complaintTitle(e) : e.description) : e.type === "story" ? (e.title || e.caption) : e.description;
   if (e.type === "complaint") {
     badges.push(<span key="u" className={`urgency-badge urgency-${e.urgency}`}>{e.urgency}</span>);
     if (e.department) badges.push(<span key="d" className="tag-badge">{e.department === UNDEFINED_UNIT ? `Unit: ${UNDEFINED_UNIT}` : `${e.department}${e.unit ? ` · ${e.unit}` : ""}`}</span>);
-    if (!draft && e.status) badges.push(<span key="st" className={`status-pill status-${e.status.replace(/\s/g, "")}`}>{e.status}</span>);
+    if (!draft && e.status) badges.push(<span key="st" className={statusClass(e)}>{statusOf(e)}</span>);
   }
   if (e.type === "interaction") {
     const stars = (e.ratings || []).map((r) => r.stars).filter((n) => n > 0);
@@ -53,15 +54,17 @@ function EntryRow({ e, onOpen }) {
  * then the four things you can add — complaints, client interactions,
  * observations and stories. Tap one to see what's already there; drafts first,
  * submitted (locked) after. "Mark as done" closes the visit.
+ * `viewer` (management looking at someone else's visit) makes the whole page read-only.
  */
-export default function VisitHub({ visit: v, tree, departments, questions, sync, initialSheet, onSave, onEditDetails, onMarkedDone, onBack, showToast }) {
+export default function VisitHub({ visit: v, tree, departments, questions, sync, initialSheet, onSave, onEditDetails, onMarkedDone, onBack, showToast, viewer = null, onDelete = null }) {
   const [sheet, setSheet] = useState(initialSheet || null); // { type, entryId? }
   const [openType, setOpenType] = useState(initialSheet?.type || null);
   const [doneAsk, setDoneAsk] = useState(false);
   const [submitReady, setSubmitReady] = useState(true);
+  const [askDelete, setAskDelete] = useState(false);
 
   const phase = phaseOf(v);
-  const readOnly = v.status === "done";
+  const readOnly = v.status === "done" || !!viewer;
   const counts = countsOf(v);
   const start = v.date ? tripStart(v) : null;
   const dur = computeDuration(v.date, v.visitTime, v.returnDate, v.returnTime);
@@ -74,12 +77,12 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
     onSave({
       ...v,
       [list]: exists ? items.map((x) => (x.id === entry.id ? entry : x)) : [...items, entry],
-      lastPlace: entry.place?.office ? entry.place : v.lastPlace || null,
+      lastPlaces: entry.places?.length ? entry.places : v.lastPlaces || null,
     });
     setSheet(null);
     setOpenType(type);
     const what = ENTRY_TYPES[type].label;
-    if (opts.submitted) showToast(`${what} submitted${type === "complaint" ? " to the admin" : ""}${sync.online ? "" : " · sends when you're online"}`);
+    if (opts.submitted) showToast(`${what} submitted${type === "complaint" ? " to the admin" : ""}${sync.online ? "" : " · will be sent when online"}`);
     else showToast(opts.auto ? `${what} kept as a draft` : `${what} saved as a draft`);
   };
   const deleteEntry = (type, id) => {
@@ -122,17 +125,17 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
           <span className={`hub-ico ${cls}`}><Icon size={19} /></span>
           <div className="tx">
             <h3>{ENTRY_TYPES[openType].plural}</h3>
-            <p>{list.length ? `${ds.length ? `${plural(ds.length, "draft")} · ` : ""}${ss.length} submitted` : "Nothing added yet."}</p>
+            <p>{list.length ? `${ds.length ? `${plural(ds.length, "draft")} · ` : ""}${ss.length} submitted` : "No entries yet."}</p>
           </div>
           {!readOnly && <button className="btn btn-primary btn-sm" onClick={() => setSheet({ type: openType })}><Plus size={14} /> New</button>}
         </div>
-        {ds.length > 0 && <div className="ep-group">{readOnly ? "Drafts · never submitted" : "Drafts · not sent yet"}</div>}
+        {ds.length > 0 && <div className="ep-group">{v.status === "done" ? "Drafts · never submitted" : viewer ? "Drafts · not submitted yet" : "Drafts · not sent yet"}</div>}
         {ds.map((e) => <EntryRow key={e.id} e={e} onOpen={() => openEntry(e)} />)}
         {ss.length > 0 && <div className="ep-group">Submitted · can't be edited</div>}
         {ss.map((e) => <EntryRow key={e.id} e={e} onOpen={() => openEntry(e)} />)}
         {!list.length && !readOnly && (
           <button type="button" className="ep-empty" onClick={() => setSheet({ type: openType })}>
-            <Plus size={16} /> Add the first {ENTRY_TYPES[openType].label.toLowerCase()}
+            <Plus size={16} /> Add a {ENTRY_TYPES[openType].label.toLowerCase()}
           </button>
         )}
       </section>
@@ -141,7 +144,7 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
 
   return (
     <div className="page">
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 10, paddingLeft: 0 }} onClick={onBack}><ArrowLeft size={14} /> Your visits</button>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 10, paddingLeft: 0 }} onClick={onBack}><ArrowLeft size={14} /> {viewer ? viewer.backLabel || "Back" : "My visits"}</button>
 
       <div className="page-head">
         <div>
@@ -152,34 +155,48 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
           <p className="h-desc">{reasonText(v)} · {start ? fmtDay(start) : "No date"}{dur ? ` · ${dur}` : ""}</p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <SyncPill sync={sync} />
+          {!viewer && <SyncPill sync={sync} />}
+          {!readOnly && onDelete && <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={() => setAskDelete(true)}><Trash2 size={15} /> Delete visit</button>}
           {!readOnly && <button className="btn btn-primary" onClick={() => { setSubmitReady(true); setDoneAsk(true); }}><CheckCheck size={16} /> Mark as done</button>}
         </div>
       </div>
 
-      {phase === "upcoming" && start && (
+      {viewer && (
         <div className="info-banner" style={{ marginBottom: 16 }}>
-          <CalendarClock size={17} />
-          <span><b>Starts {fmtDay(start)}</b> ({relativeDay(start)}). Everything saves as you go, so add entries now, on the day, or on the way back.</span>
+          <Lock size={17} />
+          <span><b>{v.employeeName}'s visit</b>, shown read-only.{v.status !== "done" && counts.drafts ? ` Drafts are still being worked on and may change.` : ""}</span>
         </div>
       )}
-      {readOnly && (
+      {phase === "upcoming" && start && !viewer && (
+        <div className="info-banner" style={{ marginBottom: 16 }}>
+          <CalendarClock size={17} />
+          <span><b>Scheduled for {fmtDay(start)}</b> ({relativeDay(start)}). Entries can be added at any time and are saved automatically.</span>
+        </div>
+      )}
+      {v.status === "done" && (
         <div className="info-banner done" style={{ marginBottom: 16 }}>
           <CheckCheck size={17} />
-          <span><b>Marked as done{v.doneAt ? ` on ${fmtDay(new Date(v.doneAt))}` : ""}.</b> This visit is closed, so everything on it is read-only.</span>
+          <span><b>Marked as done{v.doneAt ? ` on ${fmtDay(new Date(v.doneAt))}` : ""}.</b> {viewer ? "The visit is closed." : "This visit is closed, so everything on it is read-only."}</span>
         </div>
       )}
 
+      {/* The visit and its records sit inside one frame, so it's clear every record belongs to this visit. */}
+      <div className="visit-frame">
+        <div className="vf-head">
+          <span className="vf-badge"><Route size={13} /> Visit record</span>
+          <b>{tripTitle(v)}</b>
+          <span className="vf-meta">{start ? fmtDay(start) : "No date"} · <span className="mono">{v.id}</span></span>
+        </div>
       <div className="hub-grid">
         <div className="hub-col">
-          {/* One summary card; Edit opens the full visit form (where, when, why, where you're staying). */}
+          {/* One summary card; Change opens the full visit form (location, schedule, purpose, accommodation). */}
           <section className="hub-card">
             <div className="hub-head">
               <span className="hub-ico ico-route"><Route size={19} /></span>
-              <div className="tx"><h3>Visit details</h3><p>{(v.stops || []).length ? `${plural(v.stops.length, "office")} planned` : "No offices planned yet"}</p></div>
-              {!readOnly && <button className="btn btn-secondary btn-sm" onClick={() => onEditDetails()}><Edit3 size={14} /> Edit</button>}
+              <div className="tx"><h3>Visit details</h3><p>{(v.stops || []).length ? `${plural(v.stops.length, "office")} selected` : "No offices selected"}</p></div>
+              {!readOnly && <button className="btn btn-secondary btn-sm" onClick={() => onEditDetails()}><Edit3 size={14} /> Change</button>}
             </div>
-            <RouteSummary visit={v} empty="Where not chosen yet" showNone={false} />
+            <RouteSummary visit={v} empty="Location not set" showNone={false} />
             <div className="rs-line"><Clock size={14} /><span>{whenText(v)}</span></div>
             {stays.map((s) => (
               <div key={s.id} className="rs-line stay"><BedDouble size={14} /><span>{s.name || s.type}{stayRange(s) ? <span className="rs-muted"> · {stayRange(s)}</span> : null}</span></div>
@@ -188,6 +205,11 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
         </div>
 
         <div className="hub-col">
+          <section className="records-box" aria-label={`Records for visit ${v.id}`}>
+          <div className="rb-title">
+            <b>Records for this visit</b>
+            <small>Action items, client interactions, observations and stories recorded during {tripTitle(v)}{start ? `, ${fmtDay(start)}` : ""}.</small>
+          </div>
           <div className="etiles" role="group" aria-label="Add to this visit">
             {ENTRY_ORDER.map((t) => {
               const { icon: Icon, cls } = TYPE_ICONS[t];
@@ -209,7 +231,8 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
               );
             })}
           </div>
-          {panel || <p className="etiles-hint">{readOnly ? "Tap one to see what was recorded." : "Tap one to see what you've added, or + to add a new one. Each one is submitted on its own."}</p>}
+          {panel || <p className="etiles-hint">{readOnly ? "Select a category to view its entries." : "Select a category to view its entries, or + to add one. Each entry is submitted separately."}</p>}
+          </section>
 
           {/* phones only: the button at the top of the page scrolls out of reach there */}
           {!readOnly && (
@@ -217,14 +240,15 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
               <div className="hub-head">
                 <span className="hub-ico ico-done"><CheckCheck size={19} /></span>
                 <div className="tx">
-                  <h3>Finished with this visit?</h3>
-                  <p>{blocker ? `${blocker} Then mark it as done.` : `Mark it as done to close it.${counts.drafts ? ` You still have ${plural(counts.drafts, "draft")}.` : ""}`}</p>
+                  <h3>Complete this visit</h3>
+                  <p>{blocker ? `${blocker} Then mark it as done.` : `Mark the visit as done to close it.${counts.drafts ? ` ${plural(counts.drafts, "draft")} not yet submitted.` : ""}`}</p>
                 </div>
               </div>
               <button className="btn btn-secondary btn-block" onClick={() => { setSubmitReady(true); setDoneAsk(true); }}><CheckCheck size={15} /> Mark as done</button>
             </section>
           )}
         </div>
+      </div>
       </div>
 
       {sheet && (sheetEntry && !isDraft(sheetEntry) || (sheetEntry && readOnly) ? (
@@ -240,15 +264,28 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
         />
       ))}
 
+      {askDelete && (
+        <ConfirmDialog title="Delete this visit?" confirmLabel="Delete visit" cancelLabel="Cancel" tone="danger"
+                       onCancel={() => setAskDelete(false)} onConfirm={() => { setAskDelete(false); onDelete(); }}>
+          <p style={{ margin: 0 }}>The visit and everything recorded on it will be permanently deleted. This cannot be undone.</p>
+          {counts.total > 0 && (
+            <div className="done-drafts">
+              <b>{[counts.submitted && plural(counts.submitted, "submitted entry", "submitted entries"), counts.drafts && plural(counts.drafts, "draft")].filter(Boolean).join(" and ")} will be deleted.</b>
+              {counts.complaint.submitted > 0 && <p style={{ margin: "4px 0 0" }}>This includes {plural(counts.complaint.submitted, "action item")} already sent to the admin.</p>}
+            </div>
+          )}
+        </ConfirmDialog>
+      )}
+
       {doneAsk && (blocker ? (
-        <ConfirmDialog title="Add the visit dates first" confirmLabel="Add dates" cancelLabel="Not now"
+        <ConfirmDialog title="Visit dates required" confirmLabel="Add dates" cancelLabel="Cancel"
                        onCancel={() => setDoneAsk(false)} onConfirm={() => { setDoneAsk(false); onEditDetails(!v.date ? "date" : "returnDate"); }}>
-          {blocker} A visit can be marked as done once its visiting and returning dates are in. Nothing else is needed.
+          {blocker} A visit can be marked as done once its visit and return dates are entered.
         </ConfirmDialog>
       ) : (
-        <ConfirmDialog title="Mark this visit as done?" confirmLabel="Mark as done" cancelLabel="Not yet"
+        <ConfirmDialog title="Mark this visit as done?" confirmLabel="Mark as done" cancelLabel="Cancel"
                        onCancel={() => setDoneAsk(false)} onConfirm={markDone}>
-          <p style={{ margin: 0 }}>This closes the visit. You won't be able to add or change anything on it afterwards.</p>
+          <p style={{ margin: 0 }}>This closes the visit. No entries can be added or changed afterwards.</p>
           {drafts.length > 0 && (
             <div className="done-drafts">
               <b>{plural(drafts.length, "draft")} not submitted yet.</b>
@@ -258,7 +295,7 @@ export default function VisitHub({ visit: v, tree, departments, questions, sync,
                   <span>Submit the {ready.length === 1 ? "draft that is" : `${ready.length} drafts that are`} ready<small>{ready.length < drafts.length ? `${drafts.length - ready.length} incomplete ${drafts.length - ready.length === 1 ? "draft stays" : "drafts stay"} unsent.` : "They are sent with the visit."}</small></span>
                 </label>
               )}
-              {!ready.length && <p style={{ margin: "4px 0 0" }}>They're incomplete, so they stay on the visit unsent.</p>}
+              {!ready.length && <p style={{ margin: "4px 0 0" }}>They are incomplete and will remain unsubmitted.</p>}
             </div>
           )}
         </ConfirmDialog>

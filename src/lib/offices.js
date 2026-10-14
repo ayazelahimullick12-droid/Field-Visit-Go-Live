@@ -1,6 +1,8 @@
 // Office master list + coverage/quality maths shared by the visit wizard, the
 // management analytics, the branch profile and the admin Offices tab.
 
+import { isFixed } from "./complaints";
+
 export const DEFAULT_SETTINGS = { visitTargetDays: 90 };
 
 export const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -116,7 +118,7 @@ export function computeCoverage(offices, visits, targetDays = 90, now = new Date
       ...o, key: officeKey(o), region: o.district, location: o.name,
       visits: vs, visitCount: vs.length, lastDate: last?.date || null, lastBy: last?.employeeName || null,
       daysSince, status, avgRating: avg(ratings),
-      openComplaints: complaints.filter((c) => c.status !== "Resolved").length, totalComplaints: complaints.length,
+      openComplaints: complaints.filter((c) => !isFixed(c)).length, totalComplaints: complaints.length,
       quality: avg(vs.map((v) => visitChecks(v).score)),
     };
   });

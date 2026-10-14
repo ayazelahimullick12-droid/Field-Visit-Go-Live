@@ -60,7 +60,7 @@ export default function PhotoUpload({ photoUrl, onChange, hint }) {
         <div role="button" tabIndex={0} onClick={() => !busy && inputRef.current?.click()}
              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && !busy && inputRef.current?.click()} style={{ cursor: "pointer" }}>
           <Camera size={26} style={{ marginBottom: 8 }} />
-          <div style={{ fontWeight: 650, fontSize: 13, color: "var(--ink)" }}>{busy ? "Processing…" : "Tap to add a photo"}</div>
+          <div style={{ fontWeight: 650, fontSize: 13, color: "var(--ink)" }}>{busy ? "Processing…" : "Add a photo"}</div>
           <div style={{ fontSize: 11.5, marginTop: 2 }}>{hint || "JPG or PNG"}</div>
         </div>
       )}

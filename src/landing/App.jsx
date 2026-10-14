@@ -144,13 +144,13 @@ function AdminLoginCard({ adminUsers, onLogin }) {
     <div className="login-card">
       <div className="login-logo"><ShieldAlert size={22} /></div>
       <h1 className="login-title">Admin console</h1>
-      <p className="login-sub">Complaints, employees, offices and settings</p>
+      <p className="login-sub">Action items, employees, offices and settings</p>
 
       <div className="field-group">
         <label className="field-label" htmlFor="admin-pin">Admin PIN</label>
         <div className="login-input-wrap">
           <Hash size={16} className="login-input-icon" />
-          <input id="admin-pin" className="input login-input" type="password" inputMode="numeric" placeholder="4–8 digits" autoComplete="username"
+          <input id="admin-pin" className="input login-input" type="text" inputMode="numeric" placeholder="4–8 digits" autoComplete="username"
                  value={pin} onChange={(e) => setPin(e.target.value)} />
         </div>
       </div>

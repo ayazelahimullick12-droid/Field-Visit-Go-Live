@@ -172,5 +172,39 @@ export function migrateDb(db) {
     });
   }
 
+  // Several fixers per unit: a complaint assigned to one fixer before then now belongs to
+  // that unit's whole fixer pool (any of them can resolve it).
+  if (Array.isArray(db.visits)) {
+    db.visits.forEach((v) => (v.complaints || []).forEach((c) => {
+      if (!c.assignedEmployeeId || c.assignedDepartmentId) return;
+      const dept = (db.departments || []).find((d) => d.name === c.department);
+      const fixer = (db.employees || []).find((e) => e.id === c.assignedEmployeeId);
+      const deptId = dept?.id || fixer?.departmentId;
+      if (!deptId) return;
+      c.assignedDepartmentId = deptId;
+      c.assignees = c.assignees || [{ id: c.assignedEmployeeId, name: c.assignedTo, email: c.assignedEmployeeEmail || null }];
+      changed = true;
+    }));
+  }
+
+  // Complaint statuses Waiting / Assigned / In Progress / Fixed / Long Term. Before, "In Progress"
+  // meant "assigned" (nobody marked starting work), so it becomes Assigned. Each complaint is
+  // converted once (statusModel: 2), so a real In Progress set later is never touched.
+  if (Array.isArray(db.visits)) {
+    const MAP = { Open: "Waiting", "In Progress": "Assigned", Resolved: "Fixed" };
+    db.visits.forEach((v) => (v.complaints || []).forEach((c) => {
+      if (c.statusModel === 2 || !c.status) return;
+      c.status = MAP[c.status] || c.status;
+      c.statusModel = 2;
+      changed = true;
+    }));
+    // complaints are called "action items" now, and so is the visit purpose
+    db.visits.forEach((v) => {
+      if (v.reason !== "Complaint resolution") return;
+      v.reason = "Action item resolution";
+      changed = true;
+    });
+  }
+
   return changed;
 }

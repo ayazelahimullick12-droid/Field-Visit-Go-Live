@@ -1,3 +1,4 @@
+import { isFixed } from "../../lib/complaints";
 import { average, monthBuckets, monthKeyOf, visitRatings, visitChecks, DAY_MS } from "../../lib/offices";
 
 /* Shared numbers behind the management views: the dashboard's "Management view"
@@ -21,7 +22,7 @@ export function computeHealth(real, complaints, target) {
   const ratingByMonth = perMonth.map((vs) => average(vs.flatMap(visitRatings)));
   const filled = ratingByMonth.map((r, i) => r ?? (i > 0 ? ratingByMonth[i - 1] : null));
   const recent = real.filter((v) => (Date.now() - new Date(v.date).getTime()) / DAY_MS <= target);
-  const resolved = complaints.filter((c) => c.status === "Resolved").length;
+  const resolved = complaints.filter(isFixed).length;
   return {
     visitsSpark: perMonth.map((v) => v.length),
     thisMonth: perMonth[5].length, lastMonth: perMonth[4].length,

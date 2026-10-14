@@ -6,8 +6,9 @@ import { Kpi, DeltaChip, EMPTY_LOCATION_FILTER } from "./analytics/common";
 import { registeredVisits, flattenComplaints, computeHealth } from "./analytics/health";
 import CoverageView from "./analytics/CoverageView";
 
-/** Management → "Network health": are all field offices visited, and is the information gathered properly? */
-export default function NetworkHealth({ visits, offices, settings, onOpenBranch }) {
+/** "Network health": are all field offices visited, and is the information gathered properly?
+ *  `embedded` drops the page wrapper and heading (the Management section supplies its own). */
+export default function NetworkHealth({ visits, offices, settings, onOpenBranch, embedded = false }) {
   const target = settings?.visitTargetDays || 90;
   const [loc, setLoc] = useState(EMPTY_LOCATION_FILTER);
 
@@ -19,15 +20,18 @@ export default function NetworkHealth({ visits, offices, settings, onOpenBranch 
 
   const ringColor = sum.pct >= 80 ? "var(--success)" : sum.pct >= 50 ? "var(--warning)" : "var(--danger)";
 
+  const Wrap = embedded ? React.Fragment : "div";
   return (
-    <div className="page">
-      <div className="page-head">
-        <div>
-          <p className="h-eyebrow">Coverage overview</p>
-          <h1 className="h-title">Network health</h1>
-          <p className="h-desc">Whether every field office is being visited — and whether the information gathered is complete.</p>
+    <Wrap {...(embedded ? {} : { className: "page" })}>
+      {!embedded && (
+        <div className="page-head">
+          <div>
+            <p className="h-eyebrow">Coverage overview</p>
+            <h1 className="h-title">Network health</h1>
+            <p className="h-desc">Whether every field office is being visited — and whether the information gathered is complete.</p>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="card card-pad">
         <div className="net-hero">
@@ -54,7 +58,7 @@ export default function NetworkHealth({ visits, offices, settings, onOpenBranch 
                    spark={health.ratingSpark} sparkColor="var(--warning)" />
             </Reveal>
             <Reveal i={5}><Kpi icon={ShieldCheck} tone="green" label={`Info completeness (last ${target}d)`} value={health.quality == null ? "—" : Math.round(health.quality * 100)} suffix={health.quality == null ? "" : "%"} /></Reveal>
-            <Reveal i={6}><Kpi icon={CheckCircle2} tone="green" label="Complaints resolved" value={health.resolvedPct} suffix="%" foot={<span className="pill pill-brand">{health.open} open</span>} /></Reveal>
+            <Reveal i={6}><Kpi icon={CheckCircle2} tone="green" label="Action items resolved" value={health.resolvedPct} suffix="%" foot={<span className="pill pill-brand">{health.open} open</span>} /></Reveal>
           </div>
         </div>
       </div>
@@ -62,6 +66,6 @@ export default function NetworkHealth({ visits, offices, settings, onOpenBranch 
       <div style={{ marginTop: 20 }}>
         <CoverageView coverage={coverage} offices={offices} visits={real} target={target} loc={loc} setLoc={setLoc} onOpenBranch={onOpenBranch} />
       </div>
-    </div>
+    </Wrap>
   );
 }

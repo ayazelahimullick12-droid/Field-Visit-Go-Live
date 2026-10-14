@@ -29,7 +29,7 @@ export const compactPerson = (p) => Object.fromEntries(Object.entries(p || {}).f
 export const hasPerson = (p) => Object.keys(compactPerson(p)).length > 0;
 
 /** The inputs. Every field is optional. `departments` only feeds the staff Department suggestions. */
-export function PersonFields({ kind, value, onChange, departments = [], title = "Who is this?" }) {
+export function PersonFields({ kind, value, onChange, departments = [], title = "Details" }) {
   const k = kindOf(kind);
   const listId = useId();
   const fields = PERSON_FIELDS[k];
@@ -39,7 +39,7 @@ export function PersonFields({ kind, value, onChange, departments = [], title = 
   for (let i = 0; i < fields.length; i += 2) rows.push(fields.slice(i, i + 2));
   return (
     <div className="person-box">
-      <p className="person-title">{title} <span>optional</span></p>
+      {title && <p className="person-title">{title} <span>optional</span></p>}
       {rows.map((row, i) => (
         <div className="field-row" key={i}>
           {row.map((f) => <PersonInput key={f.key} f={f} value={value[f.key] || ""} onChange={(v) => set(f.key, v)} listId={f.suggest ? listId : undefined} />)}

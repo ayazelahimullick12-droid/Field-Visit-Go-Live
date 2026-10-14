@@ -12,19 +12,13 @@
 // so expandVisits() turns visits into one record per office for them.
 
 export const UNDEFINED_UNIT = "Undefined";
-export const REASONS = ["Onboarding", "Monitoring", "Training", "Complaint resolution", "Survey", "Other"];
+export const REASONS = ["Onboarding", "Monitoring", "Training", "Action item resolution", "Survey", "Other"];
 
-// Village organisations, each listed under the branch it belongs to. Only the VOs
-// under a chosen branch are ever offered, and a VO works exactly like a branch.
-export const VILLAGE_ORGS = [
-  "VO-104 · Dhanmondi Branch", "VO-118 · Dhanmondi Branch",
-  "VO-142 · Mirpur Branch", "VO-156 · Mirpur Branch",
-  "VO-091 · Savar Branch", "VO-073 · Gazipur Branch",
-  "VO-062 · Uttara Branch", "VO-115 · Tongi Branch",
-  "VO-088 · Narayanganj Branch",
-];
+// Village organisations are typed in as codes under the branch they belong to, and stored as
+// "<code> · <branch>" (e.g. "VO-142 · Mirpur Branch"), so the branch is always known.
+export const voName = (code, branch) => `${code} · ${branch}`;
 export const voBranch = (vo) => String(vo).split(" · ")[1] || "";
-export const vosUnder = (branch) => VILLAGE_ORGS.filter((vo) => voBranch(vo) === branch);
+export const voCode = (vo) => String(vo).split(" · ")[0] || "";
 
 // Where people stay on multi-day visits. BRAC Learning Centres first; the list is a
 // starting point (centres confirmed from public sources) — "Other BLC" takes any name.
@@ -35,7 +29,7 @@ export const BLCS = [
 ];
 
 export const ENTRY_TYPES = {
-  complaint: { list: "complaints", label: "Complaint", plural: "Complaints", prefix: "FC" },
+  complaint: { list: "complaints", label: "Action item", plural: "Action items", prefix: "FC" },
   interaction: { list: "interactions", label: "Client interaction", plural: "Client interactions", prefix: "CI" },
   observation: { list: "observations", label: "Observation", plural: "Observations", prefix: "OB" },
   story: { list: "stories", label: "Story", plural: "Stories", prefix: "ST" },
@@ -85,7 +79,7 @@ export const tripPath = (v) => [v.division, v.region, v.area].filter(Boolean).jo
 export function whenText(v) {
   if (!v.date) return "No date";
   const start = `${fmtDate(v.date)}${v.visitTime ? `, ${fmtTime(v.visitTime)}` : ""}`;
-  if (!v.returnDate) return `${start} → return not set`;
+  if (!v.returnDate) return `${start} → return date not set`;
   const end = v.returnDate === v.date ? (v.returnTime ? fmtTime(v.returnTime) : "same day") : `${fmtDate(v.returnDate)}${v.returnTime ? `, ${fmtTime(v.returnTime)}` : ""}`;
   return `${start} → ${end}`;
 }
@@ -119,9 +113,9 @@ export function phaseOf(v, now = new Date()) {
 
 /** A visit can be marked done once both its dates are in (and in the right order). */
 export function markDoneBlocker(v) {
-  if (!v.date) return "Add the visiting date first.";
-  if (!v.returnDate) return "Add the returning date first.";
-  if (v.returnDate < v.date) return "The returning date is before the visiting date.";
+  if (!v.date) return "Add the visit date first.";
+  if (!v.returnDate) return "Add the return date first.";
+  if (v.returnDate < v.date) return "The return date is before the visit date.";
   return "";
 }
 
@@ -157,7 +151,11 @@ export function countsOf(v) {
 
 export const officeKindOf = (name) => (/ Region Office$/.test(name) ? "region" : / Office$/.test(name) ? "area" : / · /.test(name) ? "vo" : "branch");
 export const OFFICE_KIND_LABEL = { branch: "Branch", vo: "Village organisation", area: "Area office", region: "Region office" };
-export const placeOffice = (e) => e.place?.office || e.branch || "";
+export const placeOffice = (e) => e.place?.office || e.places?.[0]?.office || e.branch || "";
+/** Every office an entry is about (newer entries can name several). */
+export const entryPlaces = (e) => (e?.places?.length ? e.places : e?.place?.office ? [e.place] : []);
+/** "Mirpur Branch, VO-142 · Mirpur Branch" style list, for one line of text. */
+export const placesText = (places) => (places || []).map((p) => (p.officeKind === "branch" ? shortName(p.office) : p.office)).join(", ");
 export const placePath = (p) => [p?.division, p?.region, p?.area].filter(Boolean).join(" › ");
 
 /** The place a planned stop stands for, in the shape entries use. */
@@ -185,9 +183,10 @@ export function expandVisits(trips) {
     }
     ENTRY_ORDER.forEach((t) => (v[ENTRY_TYPES[t].list] || []).forEach((e) => {
       if (isDraft(e)) return;
-      const key = placeOffice(e);
-      if (!key) return;
-      group(key, { ...(e.place || {}), office: key })[ENTRY_TYPES[t].list].push(e);
+      // an entry about several offices counts at each of them
+      entryPlaces(e).forEach((p) => {
+        if (p.office) group(p.office, { ...p })[ENTRY_TYPES[t].list].push(e);
+      });
     }));
     let i = 0;
     groups.forEach((g, key) => {
@@ -197,6 +196,7 @@ export function expandVisits(trips) {
         tripId: v.id,
         employeeId: v.employeeId, employeeName: v.employeeName,
         location: key, locationType: g.officeKind === "area" || g.officeKind === "region" ? "office" : "branch",
+        officeKind: g.officeKind || officeKindOf(key), branch: g.branch || "",
         division: g.division || v.division, region: g.region || v.region, area: g.area || v.area,
         date: v.date, visitTime: v.visitTime, returnDate: v.returnDate, returnTime: v.returnTime,
         duration: computeDuration(v.date, v.visitTime, v.returnDate, v.returnTime),
@@ -239,7 +239,7 @@ const sameOffice = (name, region, office) => name === office.name && (region || 
 /** How many visits planned or recorded something at this office. */
 export const visitsAtOffice = (trips, office) => (trips || []).filter((v) =>
   (v.stops || []).some((s) => sameOffice(s.name, s.region, office)) ||
-  entriesOf(v).some((e) => sameOffice(placeOffice(e), e.place?.region, office))).length;
+  entriesOf(v).some((e) => entryPlaces(e).some((p) => sameOffice(p.office, p.region, office)))).length;
 
 /** Moves past visits along when an office is renamed or moved to another area / district. */
 export function relinkOffice(trips, existing, form) {
@@ -253,8 +253,18 @@ export function relinkOffice(trips, existing, form) {
     };
     ENTRY_ORDER.forEach((t) => {
       const k = ENTRY_TYPES[t].list;
-      next[k] = (v[k] || []).map((e) => ({ ...e, place: movePlace(e.place), ...(e.branch === existing.name ? { branch: form.name } : {}) }));
+      next[k] = (v[k] || []).map((e) => ({ ...e, place: movePlace(e.place), ...(e.places ? { places: e.places.map(movePlace) } : {}), ...(e.branch === existing.name ? { branch: form.name } : {}) }));
     });
     return next;
   });
+}
+
+/* ---------- fixers ---------- */
+
+/** A complaint is assigned to a unit's fixers as a group: it is in my queue if I'm a fixer of
+ *  that unit (including one added after it was assigned), or was named on it when assigned. */
+export function inFixerQueue(c, me) {
+  if (!c.assignedEmployeeId && !c.assignedDepartmentId) return false;
+  if (c.assignedDepartmentId && me.departmentId === c.assignedDepartmentId && (me.roles || []).includes("fixer")) return true;
+  return c.assignedEmployeeId === me.id || (c.assignees || []).some((a) => a.id === me.id);
 }

@@ -11,6 +11,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // server/ holds the API and its data files (db.json, backups, uploads), which change all the time
+    watch: { ignored: ["**/server/**"] },
     proxy: {
       "/api": {
         target: API,
@@ -29,6 +31,7 @@ export default defineConfig({
         main: path.resolve(__dirname, "index.html"),
         staff: path.resolve(__dirname, "staff.html"),
         admin: path.resolve(__dirname, "admin.html"),
+        summary: path.resolve(__dirname, "summary.html"),
       },
     },
   },

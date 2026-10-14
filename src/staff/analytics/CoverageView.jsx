@@ -10,7 +10,9 @@ import bdDistricts from "../../lib/bd-districts.geojson.json";
 
 const SORT_RANK = { never: 0, stale: 1, ok: 2 };
 
-export default function CoverageView({ coverage, offices, visits, target, loc, setLoc, onOpenBranch }) {
+// `mapOnly`: just the map (with its filters) and the Needs attention list beside it — the
+// staff app's Offices page supplies its own table and numbers below.
+export default function CoverageView({ coverage, offices, visits, target, loc, setLoc, onOpenBranch, mapOnly = false }) {
   const [mode, setMode] = useState("coverage");
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -61,7 +63,7 @@ export default function CoverageView({ coverage, offices, visits, target, loc, s
       { label: "Branch", key: "name" }, { label: "Area", key: "area" }, { label: "District", key: "district" }, { label: "Division", key: "division" },
       { label: "Status", get: (r) => STATUS_META[r.status].label }, { label: "Last visit", get: (r) => r.lastDate || "" },
       { label: "Days since last visit", get: (r) => r.daysSince ?? "" }, { label: "Visits", key: "visitCount" },
-      { label: "Avg rating", get: (r) => (r.avgRating == null ? "" : r.avgRating.toFixed(1)) }, { label: "Open complaints", key: "openComplaints" },
+      { label: "Avg rating", get: (r) => (r.avgRating == null ? "" : r.avgRating.toFixed(1)) }, { label: "Open action items", key: "openComplaints" },
     ], tableRows);
 
   const single = loc.branch !== "All" ? rows[0] : null;
@@ -73,7 +75,7 @@ export default function CoverageView({ coverage, offices, visits, target, loc, s
       <div className="cov-grid">
         <MapPanel
           title="Field-office coverage map"
-          sub="Tap a division to zoom in, then a district, then an area cluster. Drag to pan; Ctrl + scroll to zoom."
+          sub="Select a division to zoom in, then a district and an area. Drag to pan; use Ctrl + scroll to zoom."
           filters={<LocationFilterBar offices={offices} value={loc} onChange={setLoc} labelled />}
           canClear={filtered} onClear={() => setLoc(EMPTY_LOCATION_FILTER)}
         >
@@ -111,6 +113,7 @@ export default function CoverageView({ coverage, offices, visits, target, loc, s
         </div>
       </div>
 
+      {!mapOnly && <>
       {/* the network-wide numbers already sit in the Network health strip, so this row
           only appears once a filter narrows the selection — and it sits below the map so
           it never pushes the map away from the filters */}
@@ -177,7 +180,7 @@ export default function CoverageView({ coverage, offices, visits, target, loc, s
 
         <div className="ctable-wrap office-table">
           <table className="ctable">
-            <thead><tr><th>Branch</th><th>Status</th><th>Last visit</th><th>Visits</th><th>Rating</th><th>Open complaints</th><th /></tr></thead>
+            <thead><tr><th>Branch</th><th>Status</th><th>Last visit</th><th>Visits</th><th>Rating</th><th>Open action items</th><th /></tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.key} style={{ cursor: "pointer" }} onClick={() => onOpenBranch(r)}>
@@ -217,6 +220,7 @@ export default function CoverageView({ coverage, offices, visits, target, loc, s
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

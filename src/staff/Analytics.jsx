@@ -41,7 +41,7 @@ export default function Analytics({ visits, offices, departments, settings, onOp
             <Kpi icon={CalendarDays} tone="blue" label="Visits this month" value={health.thisMonth}
                  delta={<DeltaChip current={health.thisMonth} previous={health.lastMonth} />} />
           </Reveal>
-          <Reveal i={2}><Kpi icon={AlertCircle} tone="red" label="Open complaints" value={health.open} foot={<span className="pill pill-brand">{health.totalComplaints} filed</span>} /></Reveal>
+          <Reveal i={2}><Kpi icon={AlertCircle} tone="red" label="Open action items" value={health.open} foot={<span className="pill pill-brand">{health.totalComplaints} filed</span>} /></Reveal>
           <Reveal i={3}><Kpi icon={CheckCircle2} tone="green" label="Resolution rate" value={health.resolvedPct} suffix="%" /></Reveal>
         </div>
       )}
@@ -50,7 +50,7 @@ export default function Analytics({ visits, offices, departments, settings, onOp
         <>
           <div className="analytics-subtabs" role="tablist">
             <button className={`analytics-subtab ${tab === "visits" ? "active" : ""}`} onClick={() => setTab("visits")}><MapPin size={14} /> Visits</button>
-            <button className={`analytics-subtab ${tab === "complaints" ? "active" : ""}`} onClick={() => setTab("complaints")}><MessageCircle size={14} /> Complaints</button>
+            <button className={`analytics-subtab ${tab === "complaints" ? "active" : ""}`} onClick={() => setTab("complaints")}><MessageCircle size={14} /> Action items</button>
           </div>
 
           {/* Visits keeps its filters beside the map; Complaints has no map, so its filters stay in a bar */}

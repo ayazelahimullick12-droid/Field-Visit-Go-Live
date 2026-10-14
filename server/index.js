@@ -3,7 +3,7 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { assignComplaint, extendDeadline, resolveComplaint, runDeadlineCheck, mergeVisit, hasSubmitted } from "./logic.js";
+import { assignComplaint, extendDeadline, resolveComplaint, startComplaint, markLongTerm, runDeadlineCheck, mergeVisit, hasSubmitted, toggleStoryLike, addStoryComment } from "./logic.js";
 import { migrateDb } from "./migrate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,7 +80,8 @@ app.delete("/api/visits/:id", (req, res) => {
     const db = readDb();
     const v = (db.visits || []).find((x) => x.id === req.params.id);
     if (!v) return res.json({ deleted: false });
-    if (v.status === "done" || hasSubmitted(v)) return res.status(409).json({ error: "A visit that is done, or has submitted entries, can't be deleted.", visit: v });
+    // a visit can be deleted at any point until it is marked done, together with everything recorded on it
+    if (v.status === "done") return res.status(409).json({ error: "A visit marked as done can't be deleted.", visit: v });
     db.visits = db.visits.filter((x) => x.id !== req.params.id);
     writeDb(db);
     res.json({ deleted: true });
@@ -108,22 +109,21 @@ app.post("/api/uploads", express.raw({ type: ["audio/*", "application/octet-stre
 });
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: true }));
 
-// --- Story feed likes (a submitted story is otherwise read-only) -----------
-app.post("/api/actions/toggle-story-like", (req, res) => {
+// --- Actions that change one field of a submitted entry (submitted entries are otherwise read-only)
+const action = (fn) => (req, res) => {
   try {
     const db = readDb();
-    const v = (db.visits || []).find((x) => x.id === req.body.visitId);
-    const s = v && (v.stories || []).find((x) => x.id === req.body.storyId);
-    if (!s) return res.status(404).json({ error: "Story not found" });
-    s.liked = !s.liked;
-    s.likes = Math.max(0, (s.likes || 0) + (s.liked ? 1 : -1));
+    const out = fn(db, req.body || {});
     writeDb(db);
-    res.json({ story: s });
+    res.json(out);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to update the story" });
+    res.status(400).json({ error: err.message });
   }
-});
+};
+app.post("/api/actions/toggle-story-like", action(toggleStoryLike));
+app.post("/api/actions/add-story-comment", action(addStoryComment));
+app.post("/api/actions/start-complaint", action(startComplaint));
+app.post("/api/actions/long-term-complaint", action(markLongTerm));
 
 // GET /api/:collection -> returns that array/object from db.json
 app.get("/api/:collection", (req, res) => {

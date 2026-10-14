@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  MapPin, Calendar, Clock, ChevronRight, ChevronUp, ChevronDown, Plus, Check,
-  Camera, Heart, MessageCircle, Share2, CheckCircle2, Home, Wrench, ClipboardList, Radar, BarChart3, CheckCheck,
+  MapPin, Calendar, ChevronRight, ChevronUp, ChevronDown, Plus, Check,
+  MessageCircle, Home, Wrench, Search, ClipboardList, BarChart3, CheckCheck, User, Users, Eye, Image as ImageIcon,
 } from "lucide-react";
 import { usePersistedCollection } from "../lib/usePersistedCollection";
 import { useVisitStore } from "../lib/useVisitStore";
@@ -14,44 +14,16 @@ import { FEATURES } from "../lib/features";
 import BdOutline from "../lib/BdOutline";
 import { CountUp, Reveal, Sparkline, DeltaChip } from "../lib/ui";
 import { buildLocationTree, computeCoverage, monthBuckets, monthKeyOf, DEFAULT_SETTINGS, STATUS_META } from "../lib/offices";
-import { expandVisits, submittedComplaints, phaseOf, PHASES, tripTitle, isoDate, plural, shortName, isDraft, countsOf, placeOffice } from "../lib/visits";
-import Analytics from "./Analytics";
-import NetworkHealth from "./NetworkHealth";
+import { expandVisits, submittedComplaints, phaseOf, PHASES, tripTitle, isoDate, plural, shortName, isDraft, countsOf, placeOffice, inFixerQueue } from "../lib/visits";
+import Management, { MGMT_TABS, EMPTY_MGMT_VIEW } from "./management/Management";
 import BranchProfile from "./BranchProfile";
 import VisitCard, { VisitGroups } from "./visits/VisitCard";
 import RegisterVisit from "./visits/RegisterVisit";
 import VisitHub from "./visits/VisitHub";
 import { SyncPill } from "./visits/SyncPill";
-
-/* ------------------------------- API ACTION HELPERS -------------------------------
-   Used by the Fixer Queue tab and the story feed, the parts of the staff app that
-   need the server's business-logic endpoints rather than saving a visit — see
-   server/logic.js for what these actually do.
-   ----------------------------------------------------------------------------------- */
-
-const API_BASE = "/api";
-
-async function postAction(path, body) {
-  const res = await fetch(`${API_BASE}/actions/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "Action failed");
-  return json;
-}
-
-const photoGradients = [
-  "linear-gradient(135deg,#EC008C 0%,#7A1FA2 100%)",
-  "linear-gradient(135deg,#2F6FED 0%,#1D1E22 100%)",
-  "linear-gradient(135deg,#1C8A54 0%,#0D3B24 100%)",
-  "linear-gradient(135deg,#B7791F 0%,#5C3A0A 100%)",
-  "linear-gradient(135deg,#EC008C 0%,#2F6FED 100%)",
-  "linear-gradient(135deg,#5B5D68 0%,#1D1E22 100%)",
-];
-
-const initials = (name) => (name || "?").split(" ").map(p => p[0]).join("").slice(0,2).toUpperCase();
+import ComplaintPage, { ComplaintTile } from "./ComplaintPage";
+import { allStories, StoryCard, StorySheet, useStoryActions, captureStoryLink, takeStoryLink } from "./Stories";
+import { statusOf, isFixed, isLate } from "../lib/complaints";
 
 /* ================================ APP ================================ */
 // Sign-in lives on the landing page (src/landing/App.jsx): PIN and password only.
@@ -83,8 +55,9 @@ export default function App() {
   });
   const currentEmployee = employees.find((e) => e.id === sessionEmployeeId) || null;
 
-  // dashboard | history | myComplaints | details | network | fixerQueue | branch | register | visit | done
+  // dashboard | history | myComplaints | mgmt | fixerQueue | branch | register | visit | done
   const [staffTab, setStaffTab] = useState("dashboard");
+  const [mgmtView, setMgmtView] = useState(EMPTY_MGMT_VIEW); // which Management page / person / visit is open
   const [prevTab, setPrevTab] = useState("dashboard");
   const [branchKey, setBranchKey] = useState(null);
   const [activeVisitId, setActiveVisitId] = useState(null);
@@ -92,8 +65,19 @@ export default function App() {
   const [hubSheet, setHubSheet] = useState(null);       // a sheet to open when the visit page shows
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [complaintRef, setComplaintRef] = useState(null); // { visitId, id, back } — the complaint page
+  const [storyRef, setStoryRef] = useState(null);         // { visitId, id } — a story opened in full
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2800); };
+
+  // A shared story link (#story=…) is remembered before the sign-in redirect, and opened once signed in.
+  useEffect(() => { captureStoryLink(); }, []);
+  useEffect(() => {
+    if (!currentEmployee || !store.loaded) return;
+    const ref = takeStoryLink();
+    if (ref) setStoryRef(ref);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentEmployee?.id, store.loaded]);
 
   const persistSession = (id) => {
     setSessionEmployeeId(id);
@@ -159,6 +143,8 @@ export default function App() {
     go("register");
   };
   const openVisit = (id, sheet = null) => { setActiveVisitId(id); setHubSheet(sheet); go("visit"); };
+  const openComplaint = (c) => { setComplaintRef({ visitId: c.visitId, id: c.id, back: staffTab }); go("complaint"); };
+  const openMgmt = (patch) => { setMgmtView((m) => ({ ...m, personId: null, visitId: null, ...patch })); go("mgmt"); };
   const openBranch = (office) => {
     setPrevTab(staffTab === "branch" ? prevTab : staffTab);
     setBranchKey(office.key);
@@ -199,26 +185,34 @@ export default function App() {
     go("register");
   };
 
-  const assignedOpen = submittedComplaints(visits).filter((c) => c.assignedEmployeeId === currentEmployee.id && c.status !== "Resolved").length;
+  const assignedOpen = submittedComplaints(visits).filter((c) => inFixerQueue(c, currentEmployee) && !isFixed(c)).length;
   const tabs = [
     { key: "dashboard", label: "Dashboard", short: "Home", icon: Home },
     { key: "history", label: "Visits", short: "Visits", icon: ClipboardList },
-    { key: "myComplaints", label: "My complaints", short: "Complaints", icon: MessageCircle },
-    ...(isManagement ? [{ key: "details", label: "Details", short: "Details", icon: BarChart3 }] : []),
-    ...(seesNetwork ? [{ key: "network", label: "Network health", short: "Network", icon: Radar }] : []),
-    ...(isFixer ? [{ key: "fixerQueue", label: "Fixer queue", short: "Queue", icon: Wrench, count: assignedOpen }] : []),
+    { key: "myComplaints", label: "My action items", short: "Action items", icon: MessageCircle },
+    ...(isManagement ? [{ key: "mgmt", label: "Management", short: "Manage", icon: BarChart3 }] : []),
+    ...(isFixer ? [{ key: "fixerQueue", label: "Action item queue", short: "Queue", icon: Wrench, count: assignedOpen }] : []),
   ];
   // the visit screens belong to "Visits"; a branch profile belongs to whichever page it was opened from
-  const shellActive = ["register", "visit", "done"].includes(staffTab) ? "history" : staffTab === "branch" ? (prevTab || "dashboard") : staffTab;
+  const shellActive = ["register", "visit", "done"].includes(staffTab) ? "history" : staffTab === "branch" ? (prevTab || "dashboard")
+    : staffTab === "complaint" ? (complaintRef?.back || "myComplaints") : staffTab;
+  const storyAll = storyRef ? allStories(visits) : [];
+  const openStory = storyRef ? storyAll.find((x) => x.visitId === storyRef.visitId && x.id === storyRef.id) : null;
+  const complaintVisit = complaintRef ? visits.find((v) => v.id === complaintRef.visitId) : null;
+  const complaintRec = complaintVisit ? (complaintVisit.complaints || []).find((c) => c.id === complaintRef.id) : null;
 
   const paletteItems = [
     { id: "go-dash", group: "Go to", label: "Dashboard", icon: Home, run: () => go("dashboard") },
     { id: "go-new", group: "Go to", label: "Register a new visit", icon: Plus, run: () => openNewVisit() },
     { id: "go-visits", group: "Go to", label: "My visits", icon: ClipboardList, run: () => go("history") },
-    { id: "go-comp", group: "Go to", label: "My complaints", icon: MessageCircle, run: () => go("myComplaints") },
-    ...(isManagement ? [{ id: "go-details", group: "Go to", label: "Details (management view)", icon: BarChart3, run: () => go("details") }] : []),
-    ...(seesNetwork ? [{ id: "go-net", group: "Go to", label: "Network health", icon: Radar, run: () => go("network") }] : []),
-    ...(isFixer ? [{ id: "go-fix", group: "Go to", label: "Fixer queue", icon: Wrench, run: () => go("fixerQueue") }] : []),
+    { id: "go-comp", group: "Go to", label: "My action items", icon: MessageCircle, run: () => go("myComplaints") },
+    ...(isManagement ? MGMT_TABS.map((t) => ({ id: `go-m-${t.key}`, group: "Management", label: t.label, icon: t.icon, run: () => openMgmt({ tab: t.key }) })) : []),
+    ...(isManagement ? employees.map((e) => ({
+      id: `p-${e.id}`, group: "People", label: e.name,
+      sub: [e.designation, e.department, e.pin && `PIN ${e.pin}`].filter(Boolean).join(" · "),
+      icon: User, run: () => openMgmt({ personId: e.id }),
+    })) : []),
+    ...(isFixer ? [{ id: "go-fix", group: "Go to", label: "Action item queue", icon: Wrench, run: () => go("fixerQueue") }] : []),
     // branch search for management; the coverage status is only shown to those who may see coverage
     ...(isManagement ? coverage.map((o) => ({
       id: o.key, group: "Branches", label: o.name,
@@ -239,28 +233,31 @@ export default function App() {
         currentEmployee={currentEmployee} visits={visits} myVisits={myVisits}
         sync={sync}
         onNew={() => openNewVisit()} onOpenVisit={openVisit} onViewHistory={() => go("history")}
-        onRefresh={store.refresh} showToast={showToast}
+        onRefresh={store.refresh} showToast={showToast} onOpenStory={(st) => setStoryRef({ visitId: st.visitId, id: st.id })}
       />
     );
-  } else if (staffTab === "details" && isManagement) {
+  } else if (staffTab === "mgmt" && isManagement) {
     content = (
-      <div className="page">
-        <div style={{ marginBottom: 22 }}>
-          <p className="h-eyebrow">Management view</p>
-          <h1 className="h-title">Details</h1>
-          <p className="h-desc">Visits and complaints across the network: ratings, offices reached, and how complaints are being handled. Built from submitted entries.</p>
-        </div>
-        <Analytics visits={reportVisits} offices={offices} departments={departments} settings={settings} onOpenBranch={openBranch} asPage />
-      </div>
+      <Management
+        view={mgmtView} setView={setMgmtView}
+        trips={visits} records={reportVisits} coverage={coverage} offices={offices}
+        employees={employees} departments={departments} settings={settings} tree={tree} questions={questions}
+        onOpenBranch={openBranch}
+      />
     );
   } else if (staffTab === "history") {
     content = <VisitHistory visits={myVisits} sync={sync} onOpen={openVisit} onNew={() => openNewVisit()} />;
   } else if (staffTab === "myComplaints") {
-    content = <MyComplaints myVisits={myVisits} />;
-  } else if (staffTab === "network" && seesNetwork) {
-    content = <NetworkHealth visits={reportVisits} offices={offices} settings={settings} onOpenBranch={openBranch} />;
+    content = <MyComplaints myVisits={myVisits} onOpen={openComplaint} />;
   } else if (staffTab === "fixerQueue" && isFixer) {
-    content = <FixerQueue me={currentEmployee} visits={visits} onRefresh={store.refresh} showToast={showToast} />;
+    content = <FixerQueue me={currentEmployee} employees={employees} departments={departments} visits={visits} onOpen={openComplaint} />;
+  } else if (staffTab === "complaint" && complaintRec) {
+    content = (
+      <ComplaintPage c={complaintRec} visit={complaintVisit} me={currentEmployee}
+        canAct={isFixer && complaintRec.state !== "draft" && inFixerQueue(complaintRec, currentEmployee)}
+        onBack={() => go(complaintRef.back || "myComplaints")} onRefresh={store.refresh} showToast={showToast}
+        onOpenVisit={() => openVisit(complaintVisit.id)} />
+    );
   } else if (staffTab === "branch" && branchRow) {
     content = <BranchProfile office={branchRow} coverageRows={coverage} onBack={() => go(prevTab || "dashboard")} onNewVisit={openNewVisit} />;
   } else if (staffTab === "register" && registerCtx) {
@@ -280,7 +277,8 @@ export default function App() {
         onSave={store.saveVisit} showToast={showToast}
         onEditDetails={(focus) => editVisit(focus || null)}
         onMarkedDone={() => go("done")}
-        onBack={() => { if (activeVisit.status !== "done") showToast("Saved. Pick it up from Your visits any time."); go("history"); }}
+        onDelete={() => { store.deleteVisit(activeVisit.id); setActiveVisitId(null); showToast("Visit deleted"); go("history"); }}
+        onBack={() => { if (activeVisit.status !== "done") showToast("Saved. Continue this visit any time from My visits."); go("history"); }}
       />
     );
   } else if (staffTab === "done" && activeVisit) {
@@ -291,7 +289,7 @@ export default function App() {
     <div className="fvt">
       <AppShell
         theme={theme} onToggleTheme={toggleTheme} brandSub="BRAC · Head Office"
-        tabs={tabs} active={shellActive} pageKey={staffTab} onTab={go}
+        tabs={tabs} active={shellActive} pageKey={staffTab} onTab={(k) => (k === "mgmt" ? openMgmt({}) : go(k))}
         fab={{ label: "New visit", icon: Plus, onClick: () => openNewVisit() }}
         onSearch={() => setPaletteOpen(true)}
         user={currentEmployee.name} userSub={roleText(roles).join(" · ")} onLogout={handleLogout}
@@ -300,7 +298,9 @@ export default function App() {
       </AppShell>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems}
-        placeholder={isManagement ? "Search pages, branches, visits…" : "Search pages and your visits…"} />
+        placeholder={isManagement ? "Search pages, people, branches and visits" : "Search pages and visits"} />
+
+      {openStory && <StoryView s={openStory} me={currentEmployee} onClose={() => setStoryRef(null)} onRefresh={store.refresh} showToast={showToast} />}
 
       {toast && <div className="toast"><Check size={16} /> {toast}</div>}
     </div>
@@ -323,23 +323,20 @@ function SectionHead({ eyebrow, action }) {
   );
 }
 
-function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpenVisit, onViewHistory, onRefresh, showToast }) {
+function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpenVisit, onViewHistory, onRefresh, showToast, onOpenStory }) {
   // Every number here is derived live from the visits — nothing is tracked
   // separately, so it always matches what's actually stored.
   const myComplaints = myVisits.flatMap((v) => (v.complaints || []).filter((c) => !isDraft(c)));
-  const openComplaints = myComplaints.filter((c) => c.status !== "Resolved").length;
-  const resolvedComplaints = myComplaints.filter((c) => c.status === "Resolved").length;
-  const myDrafts = myVisits.filter((v) => v.status !== "done").reduce((s, v) => s + countsOf(v).drafts, 0);
+  const openComplaints = myComplaints.filter((c) => !isFixed(c)).length;
+  const fixedComplaints = myComplaints.filter(isFixed).length;
+  const submitted = (type) => myVisits.reduce((s, v) => s + countsOf(v)[type].submitted, 0);
 
   const today = isoDate(new Date());
   const todayVisits = myVisits.filter((v) => v.date === today).length;
-  const observationsLogged = myVisits.reduce((s, v) => { const c = countsOf(v); return s + c.observation.submitted + c.interaction.submitted; }, 0);
 
-  // The story feed shows everyone's submitted stories; "your stories" is this employee's.
-  const allStories = visits
-    .flatMap((v) => (v.stories || []).filter((s) => !isDraft(s)).map((s) => ({ ...s, visitId: v.id, location: placeOffice(s), staffName: v.employeeName, date: (s.submittedAt || "").slice(0, 10) || v.date, employeeId: v.employeeId })))
-    .sort((a, b) => (b.submittedAt || b.date || "").localeCompare(a.submittedAt || a.date || ""));
-  const myStoriesCount = allStories.filter((s) => s.employeeId === currentEmployee.id).length;
+  // The story feed shows everyone's submitted stories.
+  const stories = allStories(visits);
+  const { like } = useStoryActions(currentEmployee, onRefresh, showToast);
 
   // What needs attention first (back but not done, in progress, upcoming), then the latest done.
   const rank = { due: 0, progress: 1, upcoming: 2, done: 3 };
@@ -355,17 +352,16 @@ function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpen
   const [overviewExpanded, setOverviewExpanded] = useState(false);
   const [storiesExpanded, setStoriesExpanded] = useState(false);
   const STORY_PREVIEW_COUNT = 4;
-  const visibleStories = storiesExpanded ? allStories : allStories.slice(0, STORY_PREVIEW_COUNT);
+  const visibleStories = storiesExpanded ? stories : stories.slice(0, STORY_PREVIEW_COUNT);
   const roles = currentEmployee.roles || [];
 
-  const toggleLike = async (s) => {
-    try {
-      await postAction("toggle-story-like", { visitId: s.visitId, storyId: s.id });
-      await onRefresh();
-    } catch {
-      showToast("Couldn't reach the server. Try again when you're online.");
-    }
-  };
+  const tile = (i, icon, cls, value, label, color) => (
+    <Reveal i={i} className="stat-card">
+      <span className={`hub-ico ${cls}`} style={{ width: 30, height: 30 }}>{React.createElement(icon, { size: 15 })}</span>
+      <div className="stat-num" style={color ? { color } : undefined}><CountUp value={value} /></div>
+      <div className="stat-label">{label}</div>
+    </Reveal>
+  );
 
   return (
     <div className="page">
@@ -378,18 +374,47 @@ function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpen
             <h1>{currentEmployee.name.split(" ")[0]}</h1>
             <p style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               {roleText(roles).map(r => <span key={r} className="role-chip">{r}</span>)}
-              <span>{currentEmployee.phone ? `${currentEmployee.phone} · ` : ""}PIN {currentEmployee.pin}</span>
+              <span>{[currentEmployee.designation, currentEmployee.phone, `PIN ${currentEmployee.pin}`].filter(Boolean).join(" · ")}</span>
             </p>
           </div>
-          <button className="btn btn-primary btn-lg" onClick={onNew}><Plus size={18} strokeWidth={2.6} /> Register new visit</button>
+          <button className="btn btn-primary btn-lg" onClick={onNew}><Plus size={18} strokeWidth={2.6} /> Register a visit</button>
         </div>
         <div className="hero-tiles">
-          <div className="hero-tile glass"><div className="ht-num"><CountUp value={myVisits.length} /></div><div className="ht-label">Your visits</div></div>
+          <div className="hero-tile glass"><div className="ht-num"><CountUp value={myVisits.length} /></div><div className="ht-label">Total visits</div></div>
           <div className="hero-tile glass"><div className="ht-num"><CountUp value={thisMonth} /></div><div className="ht-label">This month</div></div>
           <div className="hero-tile glass"><div className="ht-num"><CountUp value={officesVisited} /></div><div className="ht-label">Offices visited</div></div>
-          <div className="hero-tile glass"><div className="ht-num"><CountUp value={myDrafts} /></div><div className="ht-label">Drafts not sent</div></div>
         </div>
       </Reveal>
+
+      {/* your overview */}
+      <div className="section-gap">
+        <SectionHead
+          eyebrow="Your overview"
+          action={
+            <button className="btn btn-ghost btn-sm" onClick={() => setOverviewExpanded(e => !e)}>
+              {overviewExpanded ? <>Show less <ChevronUp size={14} /></> : <>Show more <ChevronDown size={14} /></>}
+            </button>
+          }
+        />
+        <div className="stat-row-group">
+          {tile(0, MessageCircle, "ico-complaint", submitted("complaint"), "Action items")}
+          {tile(1, Users, "ico-client", submitted("interaction"), "Client interactions")}
+          {tile(2, Eye, "ico-obs", submitted("observation"), "Observations")}
+          {tile(3, ImageIcon, "ico-story", submitted("story"), "Stories")}
+          {overviewExpanded && (
+            <>
+              <Reveal i={0} className="stat-card">
+                <div className="stat-num"><CountUp value={thisMonth} /></div>
+                <div className="stat-label">Visits this month</div>
+                <div className="kpi-foot"><Sparkline data={mySpark} color="var(--brand)" w={92} h={26} /><DeltaChip current={thisMonth} previous={lastMonth} /></div>
+              </Reveal>
+              <Reveal i={1} className="stat-card"><div className="stat-num"><CountUp value={todayVisits} /></div><div className="stat-label">Visits today</div></Reveal>
+              <Reveal i={2} className="stat-card"><div className="stat-num" style={{ color: "var(--danger)" }}><CountUp value={openComplaints} /></div><div className="stat-label">Open action items</div></Reveal>
+              <Reveal i={3} className="stat-card"><div className="stat-num" style={{ color: "var(--success)" }}><CountUp value={fixedComplaints} /></div><div className="stat-label">Fixed action items</div></Reveal>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* your visits */}
       <div className="section-gap">
@@ -404,8 +429,8 @@ function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpen
         />
         {latestVisits.length === 0 ? (
           <div className="empty-note card card-pad">
-            <p style={{ margin: "0 0 14px" }}>No visits yet. Register your first field visit to get started.</p>
-            <button className="btn btn-primary" onClick={onNew}><Plus size={16} /> Register new visit</button>
+            <p style={{ margin: "0 0 14px" }}>No visits registered yet.</p>
+            <button className="btn btn-primary" onClick={onNew}><Plus size={16} /> Register a visit</button>
           </div>
         ) : (
           <div className="vgrid">
@@ -414,81 +439,23 @@ function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpen
         )}
       </div>
 
-      {/* your overview */}
-      <div className="section-gap">
-        <SectionHead
-          eyebrow="Your overview"
-          action={
-            <button className="btn btn-ghost btn-sm" onClick={() => setOverviewExpanded(e => !e)}>
-              {overviewExpanded ? <>Show less <ChevronUp size={14} /></> : <>Show more <ChevronDown size={14} /></>}
-            </button>
-          }
-        />
-        <div className="stat-row-group">
-          <Reveal i={0} className="stat-card">
-            <div className="stat-num"><CountUp value={myVisits.length} /></div>
-            <div className="stat-label">Total visits</div>
-            <div className="kpi-foot"><Sparkline data={mySpark} color="var(--brand)" w={92} h={26} /></div>
-          </Reveal>
-          <Reveal i={1} className="stat-card">
-            <div className="stat-num"><CountUp value={thisMonth} /></div>
-            <div className="stat-label">Visits this month</div>
-            <div className="kpi-foot"><DeltaChip current={thisMonth} previous={lastMonth} /><span /></div>
-          </Reveal>
-          <Reveal i={2} className="stat-card">
-            <div className="stat-num"><CountUp value={todayVisits} /></div>
-            <div className="stat-label">Today's visits</div>
-          </Reveal>
-          {overviewExpanded && (
-            <>
-              <Reveal i={0} className="stat-card"><div className="stat-num"><CountUp value={observationsLogged} /></div><div className="stat-label">Client interactions &amp; observations</div></Reveal>
-              <Reveal i={1} className="stat-card"><div className="stat-num"><CountUp value={myStoriesCount} /></div><div className="stat-label">Stories shared</div></Reveal>
-              <Reveal i={2} className="stat-card"><div className="stat-num" style={{ color: "var(--danger)" }}><CountUp value={openComplaints} /></div><div className="stat-label">Open complaints</div></Reveal>
-              <Reveal i={3} className="stat-card"><div className="stat-num" style={{ color: "var(--success)" }}><CountUp value={resolvedComplaints} /></div><div className="stat-label">Resolved complaints</div></Reveal>
-            </>
-          )}
-        </div>
-      </div>
-
       {/* story feed */}
       <div className="section-gap">
         <SectionHead
           eyebrow="Story feed"
-          action={allStories.length > STORY_PREVIEW_COUNT && (
+          action={stories.length > STORY_PREVIEW_COUNT && (
             <button className="btn btn-ghost btn-sm" onClick={() => setStoriesExpanded(e => !e)}>
               {storiesExpanded ? <>Show less <ChevronUp size={14} /></> : <>Show more <ChevronDown size={14} /></>}
             </button>
           )}
         />
-        {allStories.length === 0 ? (
-          <div className="empty-note card card-pad">No stories posted yet. Stories appear here once they're submitted.</div>
+        {stories.length === 0 ? (
+          <div className="empty-note card card-pad">No stories have been published yet.</div>
         ) : (
           <div className="feed-grid">
             {visibleStories.map((s, i) => (
-              <Reveal className="story-card" i={i % 4} key={`${s.visitId}-${s.id}`}>
-                <div className="story-photo" style={s.photoUrl ? undefined : { background: s.gradient || photoGradients[i % photoGradients.length] }}>
-                  {s.photoUrl ? (
-                    <img src={s.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    <Camera size={28} color="rgba(255,255,255,0.85)" />
-                  )}
-                  <div className="story-photo-tag"><MapPin size={11} /> {s.location}</div>
-                </div>
-                <div className="story-head">
-                  <div className="avatar">{initials(s.staffName)}</div>
-                  <div>
-                    <div className="story-name">{s.staffName}</div>
-                    <div className="story-loc">{s.location} · {s.date}</div>
-                  </div>
-                </div>
-                <div className="story-cap">{s.caption}</div>
-                <div className="story-actions">
-                  <button className={`story-action ${s.liked ? "liked" : ""}`} onClick={() => toggleLike(s)}>
-                    <Heart size={17} fill={s.liked ? "var(--brand)" : "none"} /> {s.likes || 0}
-                  </button>
-                  <button className="story-action"><MessageCircle size={17} /> {s.comments || 0}</button>
-                  <button className="story-action" style={{ marginLeft: "auto" }}><Share2 size={17} /></button>
-                </div>
+              <Reveal i={i % 4} key={`${s.visitId}-${s.id}`}>
+                <StoryCard s={s} i={i} me={currentEmployee} onOpen={() => onOpenStory(s)} onLike={like} />
               </Reveal>
             ))}
           </div>
@@ -498,6 +465,12 @@ function StaffDashboard({ currentEmployee, visits, myVisits, sync, onNew, onOpen
   );
 }
 
+/** A story opened in full (from the feed or a shared link), with likes and comments. */
+function StoryView({ s, me, onClose, onRefresh, showToast }) {
+  const { like, comment } = useStoryActions(me, onRefresh, showToast);
+  return <StorySheet s={s} me={me} onClose={onClose} onLike={like} onComment={comment} />;
+}
+
 /* ============================== VISIT HISTORY ============================== */
 
 function VisitHistory({ visits, sync, onOpen, onNew }) {
@@ -505,16 +478,16 @@ function VisitHistory({ visits, sync, onOpen, onNew }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <p className="h-eyebrow">All visits</p>
-          <h1 className="h-title">Your visits</h1>
-          <p className="h-desc">{plural(visits.length, "visit")} on record. Open any visit to add complaints, client interactions, observations and stories, or to mark it as done.</p>
+          <p className="h-eyebrow">Visits</p>
+          <h1 className="h-title">My visits</h1>
+          <p className="h-desc">{plural(visits.length, "visit")} on record. Open a visit to record action items, client interactions, observations and stories, or to mark it as done.</p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <SyncPill sync={sync} />
-          <button className="btn btn-primary" onClick={onNew}><Plus size={16} /> Register new visit</button>
+          <button className="btn btn-primary" onClick={onNew}><Plus size={16} /> Register a visit</button>
         </div>
       </div>
-      <VisitGroups visits={visits} onOpen={onOpen} empty={<div className="empty-note card card-pad">No visits yet.</div>} />
+      <VisitGroups visits={visits} onOpen={onOpen} empty={<div className="empty-note card card-pad">No visits registered yet.</div>} />
     </div>
   );
 }
@@ -531,12 +504,12 @@ function VisitDone({ visit, sync, onDone, onOpen }) {
           <div className="confirm-check"><CheckCheck size={30} /></div>
           <h1 className="h-title">Visit marked as done</h1>
           <p className="h-desc" style={{ margin: "8px auto 0" }}>
-            {tripTitle(visit)} · {plural(c.submitted, "entry", "entries")} submitted{c.drafts ? ` · ${plural(c.drafts, "draft")} left unsent` : ""}
+            {tripTitle(visit)} · {plural(c.submitted, "entry", "entries")} submitted{c.drafts ? ` · ${plural(c.drafts, "draft")} not submitted` : ""}
           </p>
-          {waiting && <p className="field-hint" style={{ marginTop: 10 }}>This phone is offline, so this is saved here and will be sent when the connection comes back.</p>}
+          {waiting && <p className="field-hint" style={{ marginTop: 10 }}>This device is offline. The visit is saved here and will be sent when the connection is restored.</p>}
           <p className="field-hint" style={{ marginTop: 8 }}>Visit ID: <span className="mono">{visit.id}</span></p>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 24, flexWrap: "wrap" }}>
-            <button className="btn btn-secondary" onClick={onOpen}>View the visit</button>
+            <button className="btn btn-secondary" onClick={onOpen}>View visit</button>
             <button className="btn btn-primary" onClick={onDone}>Back to dashboard</button>
           </div>
         </div>
@@ -546,177 +519,130 @@ function VisitDone({ visit, sync, onDone, onOpen }) {
 }
 
 /* ============================== MY COMPLAINTS ============================== */
-// Read-only view: every complaint this signed-in employee has recorded, across
-// all of their visits, with where it stands. Complaints on a visit that hasn't
-// been submitted yet haven't reached the admin.
+// Every complaint this employee has recorded, newest first. Each tile opens the complaint page.
 
-function MyComplaints({ myVisits }) {
-  const myComplaints = myVisits
-    .flatMap(v => (v.complaints || []).map(c => ({ ...c, visitId: v.id, visitLocation: placeOffice(c), visitDate: v.date, sent: !isDraft(c), visitDone: v.status === "done" })))
-    .sort((a, b) => (b.visitDate || "").localeCompare(a.visitDate || ""));
+// Grouped by where each one stands (drafts first, fixed last), with search and status filters.
+const MY_GROUPS = [
+  ["draft", "Drafts · not submitted"],
+  ["Waiting", "Waiting for assignment"],
+  ["Assigned", "Assigned"],
+  ["In Progress", "In progress"],
+  ["Long Term", "Long term"],
+  ["Fixed", "Fixed"],
+];
+const FIXED_PREVIEW = 6;
+
+function MyComplaints({ myVisits, onOpen }) {
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [allFixed, setAllFixed] = useState(false);
+  const list = myVisits
+    .flatMap((v) => (v.complaints || []).map((c) => ({ ...c, visitId: v.id, visitDate: v.date, draft: isDraft(c) })))
+    .sort((a, b) => (b.submittedAt || b.updatedAt || b.visitDate || "").localeCompare(a.submittedAt || a.updatedAt || a.visitDate || ""));
+  const groupOf = (c) => (c.draft ? "draft" : statusOf(c));
+  const q = query.trim().toLowerCase();
+  const matches = list.filter((c) => !q || [c.id, c.title, c.description, c.department, c.unit].some((x) => String(x || "").toLowerCase().includes(q)));
+  const count = (k) => (k === "all" ? matches.length : matches.filter((c) => groupOf(c) === k).length);
+  const groups = MY_GROUPS
+    .filter(([k]) => filter === "all" || filter === k)
+    .map(([k, label]) => [k, label, matches.filter((c) => groupOf(c) === k)])
+    .filter(([, , items]) => items.length);
+  const open = list.filter((c) => !c.draft && !isFixed(c)).length;
 
   return (
     <div className="page">
-      <div style={{ marginBottom: 22 }}>
-        <p className="h-eyebrow">Your submissions</p>
-        <h1 className="h-title">My Complaints</h1>
-        <p className="h-desc">{plural(myComplaints.length, "complaint")} recorded by you, and where each one stands.</p>
+      <div style={{ marginBottom: 18 }}>
+        <p className="h-eyebrow">Action items</p>
+        <h1 className="h-title">My action items</h1>
+        <p className="h-desc">{plural(list.length, "action item")} recorded by you · {open} open. Select an action item to view its full details and progress.</p>
       </div>
 
-      {myComplaints.length === 0 ? (
-        <div className="empty-note card card-pad">You haven't recorded any complaints yet.</div>
+      {list.length === 0 ? (
+        <div className="empty-note card card-pad">No action items recorded yet.</div>
       ) : (
-        myComplaints.map(c => (
-          <div className="card card-pad" key={`${c.visitId}-${c.id}`} style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-              <div>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{c.id}</span>
-                <div style={{ fontWeight: 700, fontSize: 14, marginTop: 2 }}>{c.description || "Voice note, not written up yet"}</div>
-              </div>
-              {c.sent
-                ? <span className={`status-pill status-${(c.status || "Open").replace(/\s/g, "")}`}>{c.status || "Open"}</span>
-                : <span className="pill pill-stale">Draft · not sent</span>}
+        <>
+          <div className="toolbar">
+            <div className="search-box">
+              <Search size={16} />
+              <input className="input" placeholder="Search by code, title, description or unit" value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--ink-soft)" }}>
-              <span className={`urgency-badge urgency-${c.urgency}`}>{c.urgency}</span>
-              <span className="source-badge">{c.department}{c.unit ? ` · ${c.unit}` : ""}</span>
-              <span>{c.visitDate || "No date"} · {c.visitLocation || c.visitId}</span>
-            </div>
-            {!c.sent && <div className="field-hint">{c.visitDone ? "The visit is done, so this draft was never sent." : "It goes to the admin when you submit it from the visit."}</div>}
-            {c.person && <PersonDetails kind={c.source} person={c.person} compact />}
-            {c.photoUrl && (
-              <img src={c.photoUrl} alt="" style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 8, marginTop: 10 }} />
-            )}
-            {c.assignedTo && (
-              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 8 }}>
-                Assigned to <strong>{c.assignedTo}</strong>
-                {c.deadline && <> · Deadline: {new Date(c.deadline).toLocaleString()}</>}
-              </div>
-            )}
-            {c.status === "Resolved" && c.resolvedAt && (
-              <div style={{ fontSize: 12, color: "var(--success)", marginTop: 6, fontWeight: 650 }}>
-                Resolved on {new Date(c.resolvedAt).toLocaleString()}
-              </div>
-            )}
           </div>
-        ))
+          <div className="toolbar">
+            <div className="filter-chips">
+              {[["all", "All"], ["draft", "Drafts"], ...MY_GROUPS.slice(1).map(([k]) => [k, k])].map(([k, label]) => (
+                <button key={k} className={`filter-chip ${filter === k ? "active" : ""}`} onClick={() => setFilter(k)}>
+                  {label} <span className="fc-count">{count(k)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {groups.length === 0 && <div className="empty-note card card-pad">No action items match.</div>}
+          {groups.map(([k, label, items]) => {
+            const shown = k === "Fixed" && !allFixed && filter === "all" ? items.slice(0, FIXED_PREVIEW) : items;
+            return (
+              <section key={k} style={{ marginBottom: 20 }}>
+                <QueueHeading label={label} count={items.length} />
+                <div className="ctile-grid">
+                  {shown.map((c) => <ComplaintTile key={`${c.visitId}-${c.id}`} c={c} draft={c.draft} onOpen={() => onOpen(c)} />)}
+                </div>
+                {shown.length < items.length && (
+                  <div style={{ textAlign: "center", marginTop: 12 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setAllFixed(true)}>Show all {items.length} fixed</button>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </>
       )}
     </div>
   );
 }
 
-/* ============================== FIXER QUEUE ============================== */
-// Visible only to employees tagged with the "fixer" role — since fixers are
-// "just like normal users" with an extra role, this lives as another tab in
-// the same app rather than a separate login/panel.
+/* =========================== ACTION ITEM QUEUE =========================== */
+// Visible only to employees tagged "fixer": the complaints assigned to their unit's fixers.
+// Any fixer of the unit can start, fix or mark a complaint long term, from its page.
 
-function FixerQueue({ me, visits, onRefresh, showToast }) {
-  const [busyId, setBusyId] = useState(null);
-
-  // Work still to do comes first (escalated ones at the very top, then the soonest
-  // deadline); resolved complaints sit at the bottom, newest first.
-  const mine = submittedComplaints(visits).filter(c => c.assignedEmployeeId === me.id);
-  const inProgress = mine
-    .filter(c => c.status !== "Resolved")
-    .sort((a, b) => (b.escalated ? 1 : 0) - (a.escalated ? 1 : 0) || new Date(a.deadline || 8.64e15) - new Date(b.deadline || 8.64e15));
-  const resolved = mine
-    .filter(c => c.status === "Resolved")
-    .sort((a, b) => new Date(b.resolvedAt || 0) - new Date(a.resolvedAt || 0));
-  const myComplaints = [...inProgress, ...resolved];
-
-  const assignedCount = myComplaints.length;
-  const fixedCount = resolved.length;
-
-  const handleResolve = async (c) => {
-    setBusyId(c.id);
-    try {
-      await postAction("resolve-complaint", { visitId: c.visitId, complaintId: c.id, employeeId: me.id });
-      await onRefresh();
-      showToast(`Marked ${c.id} as resolved.`);
-    } catch (err) {
-      showToast(err.message === "Failed to fetch" ? "You're offline. Try again when you have signal." : err.message);
-    } finally {
-      setBusyId(null);
-    }
-  };
+function FixerQueue({ me, employees, departments, visits, onOpen }) {
+  const unitName = departments.find((d) => d.id === me.departmentId)?.name;
+  const teammates = employees.filter((e) => e.id !== me.id && e.departmentId && e.departmentId === me.departmentId && (e.roles || []).includes("fixer"));
+  const mine = submittedComplaints(visits).filter((c) => inFixerQueue(c, me));
+  // past-deadline first, then the soonest deadline
+  const byDeadline = (a, b) => (isLate(b) - isLate(a)) || new Date(a.deadline || 8.64e15) - new Date(b.deadline || 8.64e15);
+  const active = mine.filter((c) => ["Assigned", "In Progress"].includes(statusOf(c))).sort(byDeadline);
+  const longTerm = mine.filter((c) => statusOf(c) === "Long Term");
+  const fixed = mine.filter(isFixed).sort((a, b) => new Date(b.resolvedAt || 0) - new Date(a.resolvedAt || 0));
+  const groups = [["Action required", active], ["Long term", longTerm], ["Fixed", fixed]];
 
   return (
     <div className="page">
       <div style={{ marginBottom: 22 }}>
-        <p className="h-eyebrow">Fixer Queue</p>
-        <h1 className="h-title">Assigned to you</h1>
-        <p className="h-desc">Everything assigned to you as a fixer, its timeline, and whether it's been dealt with.</p>
+        <p className="h-eyebrow">Action item queue</p>
+        <h1 className="h-title">{unitName ? `${unitName} action items` : "Assigned action items"}</h1>
+        <p className="h-desc">
+          Action items assigned to {unitName ? `the ${unitName} unit's` : "your"} fixers.
+          {teammates.length > 0 && <> Shared with {teammates.map((e) => e.name).join(", ")}; any fixer can update an action item.</>}
+        </p>
       </div>
 
-      <div className="score-row">
-        <div className="score-card"><div className="score-num">{assignedCount}</div><div className="score-label">Assigned</div></div>
-        <div className="score-card"><div className="score-num" style={{ color: "var(--success)" }}>{fixedCount}</div><div className="score-label">Fixed</div></div>
-        <div className="score-card"><div className="score-num" style={{ color: "var(--magenta)" }}>{assignedCount - fixedCount}</div><div className="score-label">Still Open</div></div>
+      <div className="score-row score-row-4">
+        <div className="score-card"><div className="score-num">{mine.length}</div><div className="score-label">Assigned</div></div>
+        <div className="score-card"><div className="score-num" style={{ color: "var(--magenta)" }}>{active.length}</div><div className="score-label">Action required</div></div>
+        <div className="score-card"><div className="score-num" style={{ color: "var(--warning)" }}>{longTerm.length}</div><div className="score-label">Long term</div></div>
+        <div className="score-card"><div className="score-num" style={{ color: "var(--success)" }}>{fixed.length}</div><div className="score-label">Fixed</div></div>
       </div>
 
-      {myComplaints.length === 0 ? (
-        <div className="card empty-note card-pad">Nothing assigned to you yet.</div>
-      ) : (
-        myComplaints.map((c, idx) => (
-          <React.Fragment key={`${c.visitId}-${c.id}`}>
-          {idx === 0 && inProgress.length > 0 && <QueueHeading label="In progress" count={inProgress.length} />}
-          {idx === inProgress.length && resolved.length > 0 && <QueueHeading label="Resolved" count={resolved.length} />}
-          <div className="card complaint-card" style={{ marginBottom: 12, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-              <div>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{c.id}</span>
-                <div style={{ fontWeight: 700, fontSize: 14, marginTop: 2 }}>{c.description || "Voice note (listen below)"}</div>
-              </div>
-              <span className={`status-pill status-${c.status.replace(/\s/g, "")}`}>{c.status}</span>
-            </div>
-
-            {c.voice?.url && <audio controls preload="metadata" src={c.voice.url} style={{ width: "100%", marginBottom: 8 }} />}
-            {c.photoUrl && (
-              <img src={c.photoUrl} alt="" style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />
-            )}
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12, color: "var(--ink-soft)", marginBottom: 8 }}>
-              <span className={`urgency-badge urgency-${c.urgency}`}>{c.urgency}</span>
-              <span className="source-badge">{c.department}{c.unit ? ` · ${c.unit}` : ""}</span>
-              <span>Visit: {c.location} · {c.visitDate}</span>
-            </div>
-
-            {/* who raised it and how to reach them, so the fixer can follow up */}
-            <div style={{ marginBottom: 10 }}>
-              <PersonDetails kind={c.source} person={c.person} consent={c.consent} />
-            </div>
-
-            {c.deadline && (
-              <div style={{ fontSize: 11.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 5, color: c.escalated ? "var(--danger)" : "var(--ink-soft)" }}>
-                <Clock size={13} /> Deadline: {new Date(c.deadline).toLocaleString()}
-                {c.escalated && c.status !== "Resolved" && " — ESCALATED"}
-              </div>
-            )}
-
-            <div className="timeline" style={{ marginTop: 12, borderTop: "1px solid var(--line-soft)", paddingTop: 12 }}>
-              {(c.log || []).map((item, i) => (
-                <div className="tl-item" key={i}>
-                  <div className="tl-dot-wrap">
-                    <div className="tl-dot" />
-                    {i < c.log.length - 1 && <div className="tl-bar" />}
-                  </div>
-                  <div>
-                    <div className="tl-label">{item.label}</div>
-                    <div className="tl-time">{item.time}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {c.status !== "Resolved" && (
-              <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => handleResolve(c)} disabled={busyId === c.id}>
-                <CheckCircle2 size={14} /> Mark Resolved
-              </button>
-            )}
+      {mine.length === 0 ? (
+        <div className="card empty-note card-pad">No action items assigned yet.</div>
+      ) : groups.filter(([, list]) => list.length).map(([label, list]) => (
+        <div key={label} style={{ marginBottom: 18 }}>
+          <QueueHeading label={label} count={list.length} />
+          <div className="ctile-grid">
+            {list.map((c) => <ComplaintTile key={`${c.visitId}-${c.id}`} c={c} onOpen={() => onOpen(c)} />)}
           </div>
-          </React.Fragment>
-        ))
-      )}
+        </div>
+      ))}
     </div>
   );
 }

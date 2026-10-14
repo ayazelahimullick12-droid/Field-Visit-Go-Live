@@ -108,7 +108,7 @@ export default function AuthScreen({
               <label className="field-label" htmlFor="login-pin">Employee PIN</label>
               <div className="login-input-wrap">
                 <Hash size={15} className="login-input-icon" />
-                <input id="login-pin" className="input login-input" type="password" inputMode="numeric" autoComplete="username" placeholder="4–8 digits"
+                <input id="login-pin" className="input login-input" type="text" inputMode="numeric" autoComplete="username" placeholder="4–8 digits"
                        value={pin} onChange={(e) => setPin(e.target.value)} />
               </div>
             </div>
@@ -158,7 +158,7 @@ export default function AuthScreen({
               <label className="field-label">PIN</label>
               <div className="login-input-wrap">
                 <Hash size={15} className="login-input-icon" />
-                <input className="input login-input" type="password" inputMode="numeric" placeholder="4–8 digits"
+                <input className="input login-input" type="text" inputMode="numeric" placeholder="4–8 digits"
                        value={pin} onChange={(e) => setPin(e.target.value)} />
               </div>
               <p className="field-hint">This becomes your unique employee ID — you'll sign in with it and your password.</p>

@@ -85,7 +85,7 @@ export default function VisitsView({ visits, coverage, offices, showCoverage = f
       ) : (
         <>
           <p className="analytics-card-title">Visits by {DRILL_LABELS[field].toLowerCase()}</p>
-          <p className="analytics-card-sub">{loc.division === "All" ? "Nationwide. Pick a division to drill into districts, then areas, then branches." : "Within your current selection."}</p>
+          <p className="analytics-card-sub">{loc.division === "All" ? "Nationwide. Select a division to view districts, then areas and branches." : "Within your current selection."}</p>
           <RankedBarChart items={drill.counts} />
         </>
       )}

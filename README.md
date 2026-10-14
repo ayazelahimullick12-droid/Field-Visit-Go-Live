@@ -12,7 +12,7 @@ Three React apps sharing one JSON-file "database":
   voice notes (see §3c). "Mark as done" closes the visit. It keeps working
   without signal and sends everything once the phone is back online (§6a).
   It also has a story feed, a "My Complaints" tab, and — for **Fixers** — a
-  "Fixer Queue" tab right in the same app. **Management** users additionally
+  "Action item queue" tab right in the same app. **Management** users additionally
   get a **Details** tab (the management view, §3a) and a **Branch 360°
   profile** for every field office. Navigation is a sidebar on the left on
   laptops and a bottom tab bar on phones.
@@ -79,7 +79,7 @@ Email sign-in and the SSO placeholder button have been removed.
 | User type | Signs in to | Gets |
 |---|---|---|
 | **Base user** (`field`) | staff app | register visits; record complaints, client interactions, observations, stories; story feed; My complaints |
-| **Fixer** (`fixer`) | staff app | everything a base user has, plus the **Fixer queue** (complaints assigned to them) |
+| **Fixer** (`fixer`) | staff app | everything a base user has, plus the **Action item queue** (complaints assigned to them) |
 | **Management** (`management`) | staff app | everything a base user has, plus the **Details** tab (the management view) and Branch 360°; can be picked as a supervisor, who receives escalations |
 | **Admin** | admin console | complaints center, network health, units, employees, offices, client questions, emails, **admin accounts** |
 
@@ -321,23 +321,22 @@ in `settings.clientRatingQuestions`.
    known. Either way, the
    admin sets how many days the assignee gets, and clicks **Confirm
    assignment & set deadline** — this is the one admin action that:
-   - assigns it to **that unit's one fixer** (each unit has
-     exactly one — see §4a),
+   - assigns it to **all of that unit's fixers**, any of whom can
+     resolve it (see §4a),
    - sets the deadline,
    - generates an **assignment email** (logged, not actually sent — see §7).
 3. **Reminder**: 24 hours before the deadline (or 48 hours, if more than 2
    days were given), a reminder email is generated for the assignee.
-4. **Escalation**: if the deadline passes and the complaint isn't resolved,
-   an escalation email is generated automatically to the assignee's
-   **supervisor** — no admin action needed. The complaint shows up under
-   "Escalated — awaiting extension" in the admin console.
-5. Once the supervisor (in real life) tells the admin how much extra time
-   to grant, the admin opens that complaint and clicks **Grant Extension**
-   with the number of days (the complaint's detail view also shows a
-   Filed → Assigned → Being fixed → Resolved progress strip and its full
-   activity timeline). This resets the deadline and the whole
-   reminder/escalation cycle repeats against the new deadline.
-6. The assigned fixer sees the complaint in their **Fixer Queue** tab
+4. **No escalations.** A missed deadline sends no email; the complaint shows as
+   **Past deadline** to the admin (Complaints center), the fixers and management. The admin
+   can **extend the deadline** on any assigned complaint, which notifies the fixers and
+   restarts the reminder.
+5. **Statuses**: **Waiting** (submitted, not yet assigned) → **Assigned** (the admin assigned
+   it to a unit and set a deadline) → **In Progress** (a fixer tapped *Start work*) →
+   **Fixed**, or **Long Term** (a fixer marked it as needing longer-term work: no deadline
+   reminders; it can be marked Fixed later). Older records were upgraded once on start
+   (Open → Waiting, In Progress → Assigned, Resolved → Fixed).
+6. The assigned fixer sees the complaint in their **Action item queue** tab
    (staff app) — in progress first, resolved last — with the full timeline,
    photo, its unit/team and **who raised it and how to reach them**
    (the staff member's or member's details, if given; a complaint whose
@@ -354,13 +353,74 @@ a management user) just by ticking it on their record; the corresponding tab
 appears the next time they load the staff app. Supervisors are picked from
 Management. Admin accounts are managed in the same tab (Admin accounts).
 
-### 4a. One fixer per unit
+### Complaint tiles and pages
 
-Each unit has **exactly one** fixer — there's no round robin or
-queueing between multiple people. Checking the `fixer` role on an employee
-(admin console → Employees) automatically un-checks it on whoever held it
-before for that same unit, so the invariant always holds. Assigning
-a complaint always goes straight to that one person.
+My complaints and the Action item queue show each complaint as a tile: its code, status, title
+(new complaints require one) and the first 100 words of the description. Selecting a tile
+opens the complaint's own page with everything else: offices, visit, complainant, assignment,
+deadline, timeline and the resolution. A fixer of the assigned unit sees *Start work*,
+*Mark fixed* and *Mark long term* there.
+
+### Locations: area first, then offices
+
+Registering a visit requires its **Division → District → Area**. Its offices are then picked
+from three multi-select lists side by side: **Regional Offices** (all in the division),
+**Area Offices** (all in the district) and **Branch Offices** (all in the area); under each
+chosen branch, **VO codes** can be typed in (several). Observations pick their offices the same
+way, within the visit's area; an **action item** (the interface's name for a complaint; the data
+keys are unchanged) names exactly **one** office (regional, area or branch), optionally with one VO
+under a branch; client interactions offer branch offices and
+VOs only; stories take a typed location. An entry can name several offices and counts at each
+of them in the analytics. To change the area, use **Change** on the visit details. Start and
+return times are optional.
+
+A visit can be **deleted at any point until it is marked done** (visit page → *Delete visit*),
+together with everything recorded on it, including submitted entries.
+
+### Stories
+
+A story has a title, description, optional picture and a typed location. Anyone signed in can
+**like** it (once per person), **comment**, and **share** it on WhatsApp. The shared link opens
+the story in the staff app, so the reader must be able to sign in.
+
+### Management summary
+
+Management → Summary has filters for **time** (including a custom date range), **location**
+(division → district → area → branch) and **staff department**, 19 figures in four sections
+(field activity, network coverage, information gathered, complaint handling) and a *Needs
+attention* list. Selecting any figure opens a breakdown: trends, splits by location and
+department, and the underlying records. The public `/summary.html` stays a fixed snapshot.
+
+### 4a. Fixers: a shared pool per unit
+
+A unit can have **any number of fixers** (tick "Fixer" on as many employees of
+that unit as needed, in admin console → Employees). Assigning a complaint
+assigns it to the **unit as a whole**:
+
+- every fixer of that unit sees it in their **Action item queue**, including fixers
+  added after it was assigned, and each gets the assignment, reminder and
+  extension emails;
+- **any one of them** can mark it **Resolved**. The server refuses anyone who
+  isn't a fixer of that unit;
+- deadline reminders go to every fixer of the unit (there are no
+  escalation emails).
+
+When marking a complaint resolved, the fixer can add an optional **note on
+what was done** and an optional **photo** of the fix. Both are shown wherever
+the complaint appears (Action item queue, My complaints, the visit's complaint view,
+Branch 360°, admin console) and the note is written into its timeline.
+Stored on the complaint as `resolutionNotes`, `resolutionPhotoUrl`,
+`resolvedBy` / `resolvedById`, alongside `assignedDepartmentId`,
+`assignees` and `supervisors` (the older single-person fields such as
+`assignedTo` now hold the joined names). Complaints assigned before this
+change were moved into their unit's pool by the data upgrade on start.
+
+### 4b. The public summary
+
+`/summary.html` is a read-only snapshot of the Management Summary for the
+last 30 days, for anyone with the link: no sign-in, no filters, no links into
+the app, and no one's name or contact details. Management copies the link from
+Management → Summary ("Copy public link").
 
 ## 5. Photos and voice notes
 
@@ -630,7 +690,7 @@ field-visit-tracker/
     ├── landing/  (main.jsx, App.jsx)   — the "/" sign-in page: Admin/User picker, PIN + password
     ├── staff/    (main.jsx, App.jsx, Analytics.jsx, NetworkHealth.jsx, BranchProfile.jsx, analytics/*)
     │             — dashboard, Details (management), Network health tab,
-    │               Branch 360°, My Complaints, Fixer Queue
+    │               Branch 360°, My Complaints, Action item queue
     │   └── visits/  RegisterVisit, VisitHub (the visit page), EntrySheet (the forms + read-only view),
     │                Places (route editor + office picker), TimePicker (clock dial), Confirm,
     │                VisitCard, VoiceNote, PhotoUpload, SyncPill
@@ -656,7 +716,7 @@ Same as before — one web service:
 - **Assign button disabled / "no fixer set up"** — that unit has no
   employee tagged with the `fixer` role yet. Add the role under the admin
   console's Employees tab (only one employee per unit can hold it).
-- **Fixer queue / Details tab doesn't show up** — the signed-in employee
+- **Action item queue / Details tab doesn't show up** — the signed-in employee
   isn't ticked as Fixer / Management on their employee record (admin
   console → Employees). Network health is in the admin console (see §3a for
   the switch that also shows it to management).
