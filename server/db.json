@@ -51985,27 +51985,10 @@
   ],
   "settings": {
     "visitTargetDays": 90,
-    "clientRatingQuestions": [
-      {
-        "id": "RQ-STAFF",
-        "text": "Staff behaviour",
-        "active": true
-      },
-      {
-        "id": "RQ-WAIT",
-        "text": "Waiting time",
-        "active": true
-      },
-      {
-        "id": "RQ-INFO",
-        "text": "Clear information on loans and savings",
-        "active": true
-      },
-      {
-        "id": "RQ-CLEAN",
-        "text": "Cleanliness of the branch",
-        "active": true
-      }
-    ]
+    "managementTabs": {
+      "offices": false,
+      "people": false,
+      "analytics": false
+    }
   }
 }

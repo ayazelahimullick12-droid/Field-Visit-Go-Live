@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { LayoutDashboard, Building2, Users, BarChart3, Link2, ExternalLink, Check } from "lucide-react";
 import { officeKey } from "../../lib/offices";
+import { managementTabOn } from "../../lib/features";
 import Analytics from "../Analytics";
 import VisitHub from "../visits/VisitHub";
 import Summary from "./Summary";
@@ -15,6 +16,9 @@ export const MGMT_TABS = [
   { key: "people", label: "People", icon: Users, desc: "Everyone who makes visits: how many, where, how complete, and their full visit history." },
   { key: "analytics", label: "Analytics", icon: BarChart3, desc: "Visits and action items in depth: ratings, visit reasons, offices reached, and the path from action item to resolution." },
 ];
+
+/** The tabs this deployment shows: Summary always, the others when an admin has switched them on. */
+export const visibleMgmtTabs = (settings) => MGMT_TABS.filter((t) => managementTabOn(settings, t.key));
 
 /** The public, sign-in-free copy of the Summary (see src/summary/): copy or open its link. */
 function PublicLink() {
@@ -59,8 +63,11 @@ export default function Management({ view, setView, trips, records, coverage, of
     );
   }
 
-  const person = view.personId ? peopleList(employees, trips).find((p) => p.id === view.personId) : null;
-  const tab = MGMT_TABS.find((t) => t.key === view.tab) || MGMT_TABS[0];
+  const tabs = visibleMgmtTabs(settings);
+  const peopleOn = managementTabOn(settings, "people");
+  // person profiles belong to the People tab, so they are only reachable while it is switched on
+  const person = peopleOn && view.personId ? peopleList(employees, trips).find((p) => p.id === view.personId) : null;
+  const tab = tabs.find((t) => t.key === view.tab) || tabs[0];
   const showPeriod = person || ["offices", "people"].includes(tab.key); // the Summary has its own filters
 
   return (
@@ -77,9 +84,9 @@ export default function Management({ view, setView, trips, records, coverage, of
         </div>
       </div>
 
-      {!person && (
+      {!person && tabs.length > 1 && (
         <div className="analytics-subtabs" role="tablist" style={{ marginTop: 0 }}>
-          {MGMT_TABS.map((t) => (
+          {tabs.map((t) => (
             <button key={t.key} role="tab" aria-selected={tab.key === t.key} className={`analytics-subtab ${tab.key === t.key ? "active" : ""}`} onClick={() => set({ tab: t.key })}>
               <t.icon size={14} /> {t.label}
             </button>
@@ -93,7 +100,7 @@ export default function Management({ view, setView, trips, records, coverage, of
             onBack={() => set({ personId: null, tab: "people" })} onOpenVisit={openVisit} onOpenBranchByName={openBranchByName} />
         ) : tab.key === "summary" ? (
           <Summary trips={trips} records={records} coverage={coverage} offices={offices} employees={employees} departments={departments} settings={settings}
-            period={view.period} onGo={(t) => set({ tab: t })} onOpenPerson={openPerson} />
+            period={view.period} onGo={(t) => set({ tab: t })} onOpenPerson={peopleOn ? openPerson : undefined} />
         ) : tab.key === "offices" ? (
           <OfficesView records={records} offices={offices} coverage={coverage} target={settings?.visitTargetDays || 90} period={view.period} onOpenBranch={openMasterOffice} onOpenCoverageRow={onOpenBranch} onOpenPerson={openPerson} onOpenVisit={openVisit} />
         ) : tab.key === "people" ? (

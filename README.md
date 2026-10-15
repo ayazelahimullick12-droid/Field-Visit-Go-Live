@@ -118,6 +118,11 @@ employee** — both the register screen and the admin console's manual
 
 ### 3a. Management: the Details tab & Network health
 
+> **Current state:** the Management section opens on **Summary** only. An admin switches **Offices**,
+> **People** and **Analytics** on individually in **Admin console → Features** (stored as
+> `settings.managementTabs`, all off by default). Switching off Offices also hides Branch 360° and
+> branch search; switching off People also hides person profiles and their links.
+
 Management users get the normal dashboard (exactly what a base user sees)
 plus a **Details** tab in the sidebar (bottom bar on phones) — the
 management view. It is read-only and organization-wide (every submitted

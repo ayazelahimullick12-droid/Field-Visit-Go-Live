@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import {
   X, Check, Search, Users, ShieldAlert, Building2, AlertCircle, CheckSquare, Hourglass, UserCheck, Radar,
-  Plus, Edit3, Inbox, RefreshCw, MapPin, MessageCircle, TrendingUp, CheckCircle2, ChevronDown, ChevronUp, Trash2, Star, Lock,
+  Plus, Edit3, Inbox, RefreshCw, MapPin, MessageCircle, TrendingUp, CheckCircle2, ChevronDown, ChevronUp, Trash2, Star, Lock, ToggleRight,
 } from "lucide-react";
 import { usePersistedCollection } from "../lib/usePersistedCollection";
 import { makeId } from "../lib/ids";
@@ -17,6 +17,7 @@ import { statusOf, isFixed, isLate, complaintTitle } from "../lib/complaints";
 import { expandVisits, submittedComplaints, UNDEFINED_UNIT } from "../lib/visits";
 import OfficesTab from "./OfficesTab";
 import QuestionsTab from "./QuestionsTab";
+import FeaturesTab from "./FeaturesTab";
 import NetworkHealth from "../staff/NetworkHealth";
 import BranchProfile from "../staff/BranchProfile";
 
@@ -140,6 +141,7 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
     { key: "offices", label: "Offices", short: "Offices", icon: MapPin },
     { key: "questions", label: "Client questions", short: "Questions", icon: Star },
     { key: "emails", label: "Sent emails", short: "Emails", icon: Inbox },
+    { key: "features", label: "Features", short: "Features", icon: ToggleRight },
   ];
 
   return (
@@ -166,6 +168,7 @@ function AdminShell({ theme, toggleTheme, onLogout, currentAdmin }) {
           <OfficesTab offices={offices} setOffices={setOffices} visits={visits} setVisits={setVisits} settings={settings} setSettings={setSettings} showToast={showToast} />
         )}
         {tab === "questions" && <QuestionsTab settings={settings} setSettings={setSettings} visits={visits} showToast={showToast} />}
+        {tab === "features" && <FeaturesTab settings={settings} setSettings={setSettings} showToast={showToast} />}
         {tab === "emails" && <SentEmailsTab emailLog={emailLog} />}
       </AppShell>
 

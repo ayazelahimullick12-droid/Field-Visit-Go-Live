@@ -33,6 +33,7 @@ is the behavioural reference.
 13. [Templates](#13-templates)
 14. [Owner touchpoints](#14-owner-touchpoints)
 15. [Kickoff prompt for the new chat](#15-kickoff-prompt-for-the-new-chat)
+16. [Readable code standard (mandatory)](#16-readable-code-standard-mandatory)
 
 ---
 
@@ -48,6 +49,7 @@ is the behavioural reference.
 4. **Small pull requests.** One concern per PR (≈ 400 changed lines max, excluding generated files and
    migrations). Each PR updates tests and docs in the same change.
 5. **Never break the rules in §2.** If a requirement seems to force breaking one, stop and ask.
+   **Write every line to the readable code standard in §16** (copy the layer templates; CI enforces the limits).
 6. **No invented features.** If something is unclear, check the prototype; if still unclear, ask.
 7. **Keep a running `PROGRESS.md`** (phase, task checkboxes, open questions) so a new chat can resume.
 8. **Never commit secrets or real personal data.** Use `.env` files that are git-ignored and
@@ -494,7 +496,8 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 - [ ] `core/notifications`: Notifier + email channel (Nodemailer) + template rendering from messages; EmailLog statuses; dev uses Mailpit.
 - [ ] `core/sync`: idempotency middleware (`Idempotency-Key`), `schemaVersion` upgrader registry.
 - [ ] OpenAPI generation + `pnpm gen:api` producing the web client; CI check that it is up to date.
-- [ ] Seed `reference.ts` (roles, permissions, settings defaults, lists from the prototype, flags).
+- [ ] Seed `reference.ts` (roles, permissions, settings defaults, lists from the prototype, flags — including `management.offices`, `management.people`, `management.analytics`, all **off**; spec §20.1).
+- [ ] ESLint readability rules and limits from §16.2 active in CI from this phase on.
 **Acceptance:** e2e tests prove: a permission-protected test endpoint returns 403/200 correctly; a setting change is audited and visible without restart; an event written in a transaction is delivered exactly once to a listener (also after a forced crash before relay); a flag hides a test endpoint; media presign/upload/get works against MinIO.
 **Change hooks:** every later feature plugs into these; most post-go-live edits become data changes.
 
@@ -524,7 +527,7 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 - [ ] `features/units`: units + teams CRUD, fixers per unit view.
 - [ ] `features/offices`: Office (+ RO/AO generation from branch hierarchy), retire/reactivate, CSV import/export (`Branch, Area, District, Division, Latitude, Longitude, Active`), office option lists endpoint (division → district → area → RO/AO/BO per spec §6.2), VO upsert.
 - [ ] `features/rating-questions`: add, reword, reorder, switch off (no delete once answered).
-- [ ] Admin console screens: Units, Offices (incl. visit target setting), Client questions, Lists, Settings, Flags, Wording, Roles, Sent emails (read).
+- [ ] Admin console screens: Units, Offices (incl. visit target setting), Client questions, Lists, Settings, **Features** (switches for the Management tabs and other flags, spec §20.1), Wording, Roles, Sent emails (read).
 - [ ] `/api/v1/reference` bundle with ETag for offline caching.
 - [ ] Seed from prototype `server/db.json` (units/teams, 78 branches with coordinates, questions).
 **Acceptance:** admin edits each of the above and the change appears in forms without a deploy; CSV round-trips; renaming an office keeps history linked.
@@ -582,7 +585,8 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 - [ ] Shared filter schema (time preset or custom range, division/district/area/branch, staff department) and period/comparison maths.
 - [ ] Metric registry with the 19 Summary metrics and their drill panels (spec §7.2 item 9; prototype `src/staff/management/Summary.jsx`), SQL queries per metric, indexes; materialised views only if performance requires (§13 targets).
 - [ ] Endpoints: summary, drill/:metric, offices (coverage + table + CSV), people (+ profile), analytics visits/action-items, branch 360°, public summary (cached, no names, no "Needs attention").
-- [ ] Web: Management sub-tabs Summary · Offices · People · Analytics; breakdown dialog; Branch 360°; person profile with read-only visit view; public `/summary`.
+- [ ] Web: Management section with **Summary always on** and Offices · People · Analytics each behind its flag (sub-tab bar hidden when only Summary is on); dependent pages hidden with their tab (spec §20.1); breakdown dialog; Branch 360°; person profile with read-only visit view; public `/summary`.
+- [ ] API returns `FEATURE_DISABLED` (403) for endpoints of switched-off tabs.
 - [ ] `features/reporting`: read-only SQL views in a `reporting` schema + DB role for BI tools.
 **Acceptance:** numbers equal the prototype's on the migrated data set (spec §15) for a fixed list of filter combinations; analytics p95 within targets on a 100k-visit synthetic dataset.
 **Change hooks:** new figures/drills are registry entries (§9.7); BI tools cover ad-hoc reporting.
@@ -703,6 +707,7 @@ Branch `fix/…` from the release tag → fix + test → PR → tag `vX.Y.Z+1` �
 - [ ] Lint, typecheck, unit, e2e, Playwright green; coverage gate (≥ 80 % shared + api services).
 - [ ] Generated API client up to date.
 - [ ] No hard-coded UI strings; no direct cross-feature imports (lint).
+- [ ] Readable code checklist §16.12 passed (limits in §16.2 enforced by CI).
 - [ ] Migrations follow expand/contract; reviewed with the migration checklist (§13.4).
 - [ ] Feature doc, CHANGELOG (if user-visible), DECISIONS/ADR (if a decision) updated.
 - [ ] New user-visible behaviour behind a flag (or justified in the PR).
@@ -817,10 +822,272 @@ Production repository: [https://github.com/<owner>/field-visit-platform]  (empty
 
 Rules:
 - Follow BUILD_PLAN.md exactly: phases in order, the changeability principles (§2), the repository
-  skeleton (§5), the registries (§7) and the quality gates (§10).
+  skeleton (§5), the registries (§7), the quality gates (§10) and the readable code standard (§16).
+- At launch the Management section shows only Summary; Offices, People and Analytics are admin
+  switches (spec §20.1).
 - Start with Phase 0: ask me the decisions in GO_LIVE_BUILD_SPEC.md §19 in one message, with the
   defaults, and list the accounts I need to create. Do not write code until I answer.
 - Keep PROGRESS.md and DECISIONS.md up to date so work can resume in a new chat.
 - Stop for my review at the end of every phase marked "Owner review".
 - Never commit secrets or real personal data.
 ```
+
+---
+
+## 16. Readable code standard (mandatory)
+
+The owner will add features later, often with a different AI or developer. **Code must be easy to
+read by someone who has never seen it.** When readability and cleverness conflict, readability wins.
+Every PR is reviewed against §16.12.
+
+### 16.1 The ten rules
+1. **Say what it is.** Names describe the business meaning: `assignActionItemToUnit`, not `handle`,
+   `process`, `doIt`, `data2`. Use the glossary words (§16.11) exactly.
+2. **One job per function, one topic per file.** If you need "and" to describe it, split it.
+3. **Short and flat.** Functions ≤ 40 lines, nesting ≤ 3 levels, early returns instead of `else`
+   chains, no nested ternaries.
+4. **Few parameters.** ≤ 3 positional parameters; otherwise one named object
+   (`createVisit({ ownerId, area, date })`).
+5. **No magic values.** Numbers and strings with meaning are named constants, settings or registry
+   entries (`settings.visits.targetDays`, never `90`).
+6. **Types at every boundary.** Inputs and outputs of controllers, services, repositories, hooks and
+   components are typed; no `any` (lint error); `unknown` + zod parse for external data.
+7. **Pure logic in `packages/shared`.** Calculations (phases, completeness, coverage, deadlines,
+   period ranges) are pure functions with unit tests; services orchestrate, they don't calculate.
+8. **Side effects at the edges.** Database, network, time and randomness are injected or wrapped
+   (`clock.now()`, `ids.newId()`), so logic is testable and readable.
+9. **Comments explain why, not what.** Every exported function has a one-line JSDoc summary; add
+   a "why" comment wherever a reader might ask "why is it done like this?". No commented-out code.
+10. **Same thing, same shape.** Every feature folder looks the same (§5); every controller, service,
+    repository, page, form and hook follows the templates below. Copy the template, then fill it in.
+
+### 16.2 Enforced by tooling (CI fails if broken)
+```jsonc
+// packages/config/eslint (excerpt)
+{
+  "rules": {
+    "complexity": ["error", 10],
+    "max-depth": ["error", 3],
+    "max-lines-per-function": ["error", { "max": 40, "skipComments": true, "skipBlankLines": true }],
+    "max-lines": ["error", { "max": 300, "skipComments": true, "skipBlankLines": true }],
+    "max-params": ["error", 3],
+    "no-nested-ternary": "error",
+    "no-magic-numbers": ["warn", { "ignore": [0, 1, -1, 2, 100], "ignoreArrayIndexes": true, "enforceConst": true }],
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/explicit-module-boundary-types": "error",
+    "id-length": ["error", { "min": 2, "exceptions": ["i", "j", "x", "y", "_"] }],
+    "import/no-cycle": "error",
+    "jsdoc/require-jsdoc": ["error", { "publicOnly": true }],
+    "no-restricted-syntax": ["error", { "selector": "JSXText[value=/[A-Za-z]{3,}/]", "message": "Use t('key') for UI text." }]
+  }
+}
+```
+Plus: Prettier (formatting is never discussed in review), `tsc --noEmit` strict, `knip` (unused
+files/exports), and a boundaries rule (features may not import other features).
+Exceptions need an inline `// eslint-disable-next-line <rule> -- <reason>`; reviewers check the reason.
+
+### 16.3 File size and structure limits
+| Kind | Soft limit | When exceeded |
+|---|---|---|
+| React component file | 200 lines | extract sub-components into `components/` |
+| Page component | 150 lines | move logic into a hook (`useXPage`) and sections into components |
+| Service | 300 lines | split by use case (`action-items.assign.service.ts`, `…transitions.service.ts`) |
+| Repository | 250 lines | split by aggregate |
+| Function | 40 lines | extract named helpers |
+
+### 16.4 Naming dictionary
+| Kind | Pattern | Examples |
+|---|---|---|
+| Boolean | `is/has/can/should` + adjective | `isDone`, `hasVoiceNote`, `canAssign` |
+| Function doing an action | verb + object | `submitEntry`, `scheduleReminder`, `computeCoverage` |
+| Function returning a value | noun or `get` + noun | `visitPhase(visit)`, `getUnitFixers(unitId)` |
+| Event handler (web) | `on` + event / `handle` + event | `onSubmit`, `handleAssignClick` |
+| React hook | `use` + noun | `useVisit(id)`, `useActionItemQueue()` |
+| Constant | UPPER_SNAKE | `MAX_TITLE_LENGTH` |
+| Zod schema | noun + `Schema` | `actionItemSubmitSchema` |
+| Type from schema | PascalCase | `ActionItemSubmit` |
+| Test | "does X when Y" | `it("refuses changes once the visit is done")` |
+Avoid abbreviations except: `id`, `url`, `api`, `db`, `vo`, `ro`, `ao`, `bo`.
+
+### 16.5 Comments and documentation in code
+- **File header** (every file): one or two lines saying what the file is for and where it is used.
+- **Exported functions/components:** JSDoc with summary, `@param` only when not obvious, and a short
+  `@example` for shared business functions.
+- **Business rules in code** reference the spec: `// Spec §6.5: only fixers of the assigned unit may start work.`
+- **Each feature folder** has a `README.md` (10–30 lines): purpose, main files, events emitted and
+  consumed, permissions used, link to `docs/features/<feature>.md`.
+- **`docs/CODEBASE_TOUR.md`**: a one-page guided tour (how a request flows from a button to the
+  database and back, where registries live, how to add a feature) kept current.
+
+### 16.6 Error handling
+- Throw domain errors with stable codes (`throw new DomainError('VISIT_DONE_LOCKED')`), never strings.
+- One global filter maps errors to HTTP responses; services never build HTTP responses.
+- The web shows catalog messages for codes; never raw messages or stack traces.
+- Never swallow errors silently; log with context (`logger.warn({ visitId }, 'sync rejected: visit done')`).
+
+### 16.7 Template — API controller (thin)
+```ts
+// apps/api/src/features/action-items/action-items.controller.ts
+// HTTP entry points for action items. Validation and permissions here; all logic in the service.
+@Controller({ path: 'action-items', version: '1' })
+export class ActionItemsController {
+  constructor(private readonly actionItems: ActionItemsService) {}
+
+  /** Runs one workflow transition (assign, start, fix, longTerm, extend) on an action item. */
+  @Post(':id/transitions/:transition')
+  @Requires('actionItem.transition')            // fine-grained check happens in the service
+  async runTransition(
+    @Param('id') id: string,
+    @Param('transition') transition: TransitionKey,
+    @Body(new ZodPipe(transitionInputSchema)) input: TransitionInput,
+    @CurrentUser() user: SignedInUser,
+  ): Promise<ActionItemDto> {
+    return this.actionItems.runTransition({ id, transition, input, user });
+  }
+}
+```
+
+### 16.8 Template — API service (orchestrates)
+```ts
+// apps/api/src/features/action-items/action-items.service.ts
+// Use cases for action items. Reads the workflow registry; never contains SQL.
+@Injectable()
+export class ActionItemsService {
+  constructor(
+    private readonly repo: ActionItemsRepository,
+    private readonly policies: ActionItemsPolicies,
+    private readonly effects: ActionItemEffects,
+    private readonly events: EventBus,
+    private readonly db: Db,
+  ) {}
+
+  /** Applies a workflow transition after checking the state, the permission and the actor. */
+  async runTransition({ id, transition, input, user }: RunTransitionArgs): Promise<ActionItemDto> {
+    const item = await this.repo.getOrThrow(id);
+    const rule = actionItemWorkflow.transitions[transition];
+
+    this.policies.assertCanRun(user, item, rule);          // throws ACTION_ITEM_NOT_UNIT_FIXER etc.
+    assertTransitionAllowed(item.status, rule);            // pure, from packages/shared
+
+    return this.db.transaction(async (tx) => {
+      const updated = await this.repo.applyTransition(tx, { item, rule, input, actorId: user.id });
+      await this.effects.run(tx, rule.effects, { item: updated, input, actor: user });
+      await this.events.publish(tx, new ActionItemStatusChanged(updated, transition, user.id));
+      return toActionItemDto(updated);
+    });
+  }
+}
+```
+
+### 16.9 Template — API repository (all database access)
+```ts
+// apps/api/src/features/action-items/action-items.repository.ts
+// Every Prisma query for action items lives here, so services read like plain English.
+@Injectable()
+export class ActionItemsRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** Loads an action item or throws NOT_FOUND. */
+  async getOrThrow(id: string): Promise<ActionItemRecord> {
+    const item = await this.prisma.actionItem.findUnique({ where: { id }, include: ACTION_ITEM_INCLUDE });
+    if (!item) throw new DomainError('NOT_FOUND');
+    return item;
+  }
+
+  /** Items in the queue of a unit, past-deadline first, then soonest deadline. */
+  listQueue(unitId: string): Promise<ActionItemRecord[]> {
+    return this.prisma.actionItem.findMany({
+      where: { assignedUnitId: unitId, state: 'SUBMITTED' },
+      orderBy: [{ deadline: 'asc' }],
+      include: ACTION_ITEM_INCLUDE,
+    });
+  }
+}
+```
+
+### 16.10 Template — shared pure function, web page, form, hook and test
+```ts
+// packages/shared/src/features/visits/rules.ts
+// Pure visit rules shared by the API and the web app.
+
+/**
+ * Where a visit is in its life: done, upcoming, due (back but not marked done) or in progress.
+ * @example visitPhase({ status: 'OPEN', date: '2026-10-20', ... }, now) // 'upcoming'
+ */
+export function visitPhase(visit: VisitDates, now: Date): VisitPhase {
+  if (visit.status === 'DONE') return 'done';
+  if (startOf(visit) > now) return 'upcoming';
+  const returnAt = returnOf(visit);
+  if (returnAt && returnAt <= now) return 'due';
+  return 'progress';
+}
+```
+```tsx
+// apps/web/src/features/action-items/pages/MyActionItemsPage.tsx
+// "My action items": the signed-in user's action items, grouped by status, with search and filters.
+export function MyActionItemsPage(): JSX.Element {
+  const { t } = useMessages();
+  const { groups, filter, setFilter, query, setQuery, isLoading } = useMyActionItemsPage();
+
+  if (isLoading) return <PageSkeleton />;
+  if (groups.total === 0) return <EmptyState text={t('actionItems.mine.empty')} />;
+
+  return (
+    <Page title={t('actionItems.mine.title')} description={t('actionItems.mine.description', { count: groups.total })}>
+      <SearchBox value={query} onChange={setQuery} placeholder={t('actionItems.mine.search')} />
+      <StatusFilterChips value={filter} onChange={setFilter} counts={groups.counts} />
+      {groups.visible.map((group) => (
+        <ActionItemGroup key={group.key} group={group} />
+      ))}
+    </Page>
+  );
+}
+```
+```ts
+// apps/web/src/features/action-items/queries.ts
+// TanStack Query hooks for action items. One hook per endpoint; keys from queryKeys.ts.
+
+/** The signed-in fixer's unit queue. Refetches when a transition succeeds. */
+export function useActionItemQueue() {
+  return useQuery({ queryKey: queryKeys.actionItems.queue(), queryFn: () => api.actionItems.listQueue() });
+}
+```
+```ts
+// apps/api/src/features/action-items/__tests__/transitions.e2e.spec.ts
+describe('action item transitions', () => {
+  it('lets any fixer of the assigned unit start work', async () => { /* Given / When / Then */ });
+  it('refuses a fixer from another unit with ACTION_ITEM_NOT_UNIT_FIXER', async () => { /* … */ });
+  it('stops reminders once the item is marked long term', async () => { /* fake clock */ });
+});
+```
+
+### 16.11 Glossary (use these words in code, docs and UI)
+| Word | Meaning | Code name |
+|---|---|---|
+| Visit | A field visit registered by a staff member | `Visit` |
+| Visit area | Division → District → Area of a visit | `division`, `district`, `area` |
+| Planned offices | Offices selected when registering | `VisitOffice` |
+| Entry | Anything recorded on a visit | `Entry` (base), per type below |
+| Action item | A problem to fix (formerly "complaint") | `ActionItem` |
+| Client interaction | Client feedback with ratings | `ClientInteraction` |
+| Observation | Something observed (may be referred by BRAC staff) | `Observation` |
+| Story | A post with likes, comments, share | `Story` |
+| Office visit | One (visit, office) pair used by analytics | `OfficeVisitRecord` |
+| Unit / Team | Routing unit for action items and its sub-group | `Unit`, `Team` |
+| Fixer pool | All fixers of a unit | `unitFixers` |
+| Department | An employee's department (not the unit) | `User.department` |
+| Coverage | Branch visited within the target days | `coverageStatus` |
+| Completeness | The 5-check information score | `completenessScore` |
+| Feature switch | Admin on/off for a part of the app | `FeatureFlag` |
+
+### 16.12 Readability review checklist (copy into every PR review)
+- [ ] Could a new developer tell what each changed file does from its header and names alone?
+- [ ] Every function ≤ 40 lines, one job, ≤ 3 params, ≤ 3 nesting levels, no nested ternaries.
+- [ ] Names use the glossary; no abbreviations outside the allowed list.
+- [ ] Business numbers/strings come from settings, registries or named constants.
+- [ ] Pure logic lives in `packages/shared` with unit tests; services orchestrate; repositories hold queries.
+- [ ] Exported functions have JSDoc; non-obvious decisions have a "why" comment with a spec reference.
+- [ ] UI text via `t()`; errors via codes; empty/loading/error/offline states handled.
+- [ ] The feature folder `README.md` and `docs/features/<x>.md` reflect the change.
+- [ ] Tests read like a specification ("does X when Y").
+

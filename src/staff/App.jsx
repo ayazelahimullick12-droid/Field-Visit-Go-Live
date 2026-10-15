@@ -15,7 +15,8 @@ import BdOutline from "../lib/BdOutline";
 import { CountUp, Reveal, Sparkline, DeltaChip } from "../lib/ui";
 import { buildLocationTree, computeCoverage, monthBuckets, monthKeyOf, DEFAULT_SETTINGS, STATUS_META } from "../lib/offices";
 import { expandVisits, submittedComplaints, phaseOf, PHASES, tripTitle, isoDate, plural, shortName, isDraft, countsOf, placeOffice, inFixerQueue } from "../lib/visits";
-import Management, { MGMT_TABS, EMPTY_MGMT_VIEW } from "./management/Management";
+import Management, { visibleMgmtTabs, EMPTY_MGMT_VIEW } from "./management/Management";
+import { managementTabOn } from "../lib/features";
 import BranchProfile from "./BranchProfile";
 import VisitCard, { VisitGroups } from "./visits/VisitCard";
 import RegisterVisit from "./visits/RegisterVisit";
@@ -206,15 +207,15 @@ export default function App() {
     { id: "go-new", group: "Go to", label: "Register a new visit", icon: Plus, run: () => openNewVisit() },
     { id: "go-visits", group: "Go to", label: "My visits", icon: ClipboardList, run: () => go("history") },
     { id: "go-comp", group: "Go to", label: "My action items", icon: MessageCircle, run: () => go("myComplaints") },
-    ...(isManagement ? MGMT_TABS.map((t) => ({ id: `go-m-${t.key}`, group: "Management", label: t.label, icon: t.icon, run: () => openMgmt({ tab: t.key }) })) : []),
-    ...(isManagement ? employees.map((e) => ({
+    ...(isManagement ? visibleMgmtTabs(settings).map((t) => ({ id: `go-m-${t.key}`, group: "Management", label: t.label, icon: t.icon, run: () => openMgmt({ tab: t.key }) })) : []),
+    ...(isManagement && managementTabOn(settings, "people") ? employees.map((e) => ({
       id: `p-${e.id}`, group: "People", label: e.name,
       sub: [e.designation, e.department, e.pin && `PIN ${e.pin}`].filter(Boolean).join(" · "),
       icon: User, run: () => openMgmt({ personId: e.id }),
     })) : []),
     ...(isFixer ? [{ id: "go-fix", group: "Go to", label: "Action item queue", icon: Wrench, run: () => go("fixerQueue") }] : []),
     // branch search for management; the coverage status is only shown to those who may see coverage
-    ...(isManagement ? coverage.map((o) => ({
+    ...(isManagement && managementTabOn(settings, "offices") ? coverage.map((o) => ({
       id: o.key, group: "Branches", label: o.name,
       sub: seesNetwork ? `${o.area} · ${o.district} — ${STATUS_META[o.status].label}` : `${o.area} · ${o.district}`,
       icon: MapPin, color: seesNetwork ? STATUS_META[o.status].color : undefined, run: () => openBranch(o),

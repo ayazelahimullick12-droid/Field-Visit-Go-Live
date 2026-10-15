@@ -523,7 +523,8 @@ people and branches).
 8. **Action item queue** (FIXER): title "<Unit> action items", teammates listed, score cards
    (Assigned, Action required, Long term, Fixed), groups Action required (past deadline first,
    then soonest deadline) · Long term · Fixed, using the same tiles.
-9. **Management** (sub-tabs): **Summary · Offices · People · Analytics**.
+9. **Management** (sub-tabs): **Summary · Offices · People · Analytics**. **At launch only Summary is
+   shown;** an admin switches Offices, People and Analytics on individually (Admin → Features, §20.1).
    - **Summary:** filters — time (Last 30 days, Last 90 days, This month, This year, All time,
      Custom range), location (Division → District → Area → Branch), staff Department; one-line
      narrative; 19 clickable tiles in 4 sections (Field activity: Visits, Offices reached, Active
@@ -556,7 +557,8 @@ form with fixer-pool preview, extend-deadline form, resolution, timeline) · **N
 designation, department, roles, unit, supervisor, approval; **Admin accounts**) · **Offices**
 (master list CRUD, retire, CSV import/export `Branch, Area, District, Division, Latitude,
 Longitude, Active`, visit target days) · **Client questions** (add, reword, reorder, switch off)
-· **Sent emails** (log with type filter and status).
+· **Sent emails** (log with type filter and status) · **Features** (switches for the Management tabs
+§20.1, and later any other feature flag).
 
 ---
 
@@ -834,6 +836,7 @@ rewrites history. Code may only rely on values marked `system: true` (e.g. "Othe
   per-user notification preference table.
 
 ### 18.6 Feature flags
+The first flags are `management.offices`, `management.people`, `management.analytics` (off at launch, §20.1).
 `FeatureFlag { key, enabled, rolesAllowed[], usersAllowed[], percentage }` read through one
 `isEnabled(user, key)` helper on both API and web (cached, sent with `/auth/me`). Every new
 feature ships behind a flag, first to staging, then to chosen users, then to everyone. Admin
@@ -885,3 +888,239 @@ metrics accept the same filter object.
 7. **Data retention** for visits, action items and media. [Keep indefinitely.]
 8. **Action item code prefix** for new records. [Keep `FC-`.]
 9. **Public summary** — keep public, or restrict to the BRAC network. [Public snapshot, no names.]
+
+---
+
+## 20. Detailed reference (field-level specifications)
+
+This section is the exhaustive checklist the screens, API and tests must match. Field names in
+`code` are the API/DB names; labels are the UI wording (message catalog defaults).
+
+### 20.1 Management section visibility (admin-controlled)
+- The Management section shows **Summary only** by default.
+- **Offices**, **People** and **Analytics** are each switched on individually by an admin in
+  **Admin console → Features** (feature flags `management.offices`, `management.people`,
+  `management.analytics`, all **off** at launch; they apply to every user with `analytics.view`).
+- When only Summary is on, the sub-tab bar is hidden.
+- Dependent features follow their tab:
+
+  | Switch off | Also hidden |
+  |---|---|
+  | Offices | Branch 360° pages, branch results in Ctrl/⌘ + K search, office-level links from other pages |
+  | People | Person profiles, people results in search, staff-name links in Summary breakdowns (names still shown as text) |
+  | Analytics | Nothing else |
+
+- The API enforces the same switches (403 `FEATURE_DISABLED` on the hidden tabs' endpoints).
+- The admin Features tab shows Summary as "Always on" and one switch per other tab with a one-line
+  description, the current state (On/Off), and an audit entry on every change.
+
+### 20.2 Forms — every field
+
+Legend: **R** required, **O** optional, **C** conditional.
+
+**Login (User / Admin)**
+| Field | Type | Rule |
+|---|---|---|
+| `pin` "PIN" | text, numeric keypad, **visible** | R, 4–8 digits |
+| `password` "Password" | password | R |
+
+**Registration**
+| Field | Rule |
+|---|---|
+| `name` "Full name" | R, 2–80 chars |
+| `designation` "Designation" | R, from list `designations` or free text (e.g. Deputy Manager, Financial Application Planner) |
+| `department` "Department" | R, from list `staffDepartments` or free text (e.g. Microfinance) |
+| `pin` "PIN" | R, 4–8 digits, unique across all users |
+| `email` "Email" | R, valid email, unique |
+| `phone` "Phone" | R, Bangladesh mobile format `^01[3-9]\d{8}$` (accept `+880` prefix and normalise) |
+| `password` / `confirmPassword` | R, ≥ 8 chars, must match |
+
+**Register / Change visit**
+| Section | Field | Rule |
+|---|---|---|
+| Visit location | `division` "Division", `district` "District", `area` "Area" | R each, cascading selects from the office master list |
+| Offices to be visited (optional) | `regionOffices` "Regional Office" | O, multi-select, options = REGION_OFFICE in division |
+| | `areaOffices` "Area Office" | O, multi-select, options = AREA_OFFICE in district |
+| | `branches` "Branch Office" | O, multi-select, options = BRANCH in area |
+| | `vos[branchId]` "VO codes · <branch>" | O, tag input per selected branch; normalise upper case, spaces → `-`; unique per branch |
+| Purpose of visit | `reason` "Purpose" | R, list `visitPurposes` (default Monitoring) |
+| | `reasonOther` "Specify purpose" | C: R when reason = Other; ≤ 120 chars |
+| Schedule | `date` "Visit date" | R, default today |
+| | `startTime` "Start time" | O, HH:mm (clock-dial picker or typed) |
+| | `returnDate` "Return date" | O, ≥ visit date |
+| | `returnTime` "Return time" | O; if all four are set, return must be after start |
+| | "Duration" | read-only, computed "N days N hrs N mins" |
+| Accommodation (optional, repeatable) | `type` "Accommodation type" | R per stay, list `accommodationTypes` |
+| | `name` "BLC" / "Name" | R per stay; BLC → list `blcs` or "Other BLC (enter name)" |
+| | `checkIn` / `checkOut` "Check-in date" / "Check-out date" | R per stay, follow visit dates until edited, check-out ≥ check-in |
+| | `notes` "Remarks" | O |
+
+**Action item**
+| Section | Field | Rule |
+|---|---|---|
+| Action item details | `title` "Title" | R, ≤ 120 chars |
+| | `description` "Description" | C: R unless a voice note exists |
+| | `voice` (record button) | O, ≤ `media.voiceMaxSeconds` |
+| | `urgency` "Urgency" | R, segmented Low / Medium / High, default Medium |
+| | `photo` "Photo" | O, resized client-side |
+| Routing | `unitId` "Unit" | R; includes "Undefined" (stored as null + flag `unitUndefined`) |
+| | `teamId` "Team" | O, options = teams of the unit |
+| Raised by (optional) | `source` | BRAC staff / Client toggle |
+| | staff: `name`, `pin`, `designation`, `department`, `contact` | O each |
+| | client: `name`, `phone`, `memberNumber`, `voCode`, `branchCode`, `projectCode` | O each |
+| | `consent` "Consent to follow-up contact" | checkbox, default on |
+| Office * | `office` | R, **exactly one** of Regional / Area / Branch Office (single-choice dropdowns, choosing one clears the others) |
+| | `vo` "VO code · <branch>" | O, **one** code, only when the office is a branch |
+| (last) | information note | "An action item is sent to the admin as soon as it is submitted. Until then it is a draft visible only to you." |
+
+**Client interaction**
+| Section | Field | Rule |
+|---|---|---|
+| Client feedback | `description` "Feedback" + voice | C: R unless at least one rating |
+| | `ratings[questionId]` | O per active question, 1–5 stars, tap again to clear |
+| | `photo` | O (sits here, with the feedback) |
+| Client information (optional) | `name`, `phone`, `memberNumber`, `voCode`, `branchCode`, `projectCode` | O each |
+| Branch office / VO * | `offices` | R, one or more Branch Offices and/or VO codes under them |
+
+**Observation**
+| Section | Field | Rule |
+|---|---|---|
+| Observation | `description` + voice | C: R unless a photo exists |
+| | `photo` | O |
+| Source | `referredByStaff` "Referred by BRAC staff" | checkbox |
+| | staff details (`name`, `pin`, `designation`, `department`, `contact`) | O, shown when ticked |
+| Office(s) * | `offices` | R, one or more of any type, VOs under branches |
+
+**Story**
+| Field | Rule |
+|---|---|
+| `title` "Title" | R, ≤ 120 chars |
+| `description` "Description" | R |
+| `photo` "Picture" | O |
+| `locationText` "Location" | O, ≤ 160 chars, typed |
+
+**Admin: assign action item** — `unitId` (R if the item's unit is Undefined), `teamId` (O),
+`deadlineDays` "Days to fix" (R, 1–60, default setting `actionItems.defaultDeadlineDays`), live
+preview "Will assign to this unit's N fixers: …".
+**Admin: extend deadline** — `days` "Additional days" (R, 1–60).
+**Fixer: mark fixed** — `note` "Action taken" (O, ≤ 1000), `photo` (O).
+**Fixer: mark long term** — `note` "Reason" (O, ≤ 1000).
+**Story comment** — `text` (R, 1–`stories.commentMaxLength`).
+
+### 20.3 Permission matrix (default roles)
+
+| Capability | FIELD | FIXER | MANAGEMENT | ADMIN |
+|---|:-:|:-:|:-:|:-:|
+| Register / change / delete own visits, record entries | ✓ | ✓ | ✓ | — |
+| View own drafts and submissions; My action items | ✓ | ✓ | ✓ | — |
+| Story feed, like, comment, share | ✓ | ✓ | ✓ | ✓ (read, moderate) |
+| Action item queue of own unit; start / fix / long term | — | ✓ | — | — |
+| Management → Summary | — | — | ✓ | ✓ |
+| Management → Offices / People / Analytics (when switched on) | — | — | ✓ | ✓ |
+| View any visit read-only | — | — | ✓ | ✓ |
+| Assign action items, extend deadlines | — | — | — | ✓ |
+| Manage users, roles, units/teams, offices, lists, settings, questions, wording, features | — | — | — | ✓ |
+| View sent-emails log, network health | — | — | — | ✓ |
+
+Roles stack (a FIELD user who is also FIXER and MANAGEMENT gets all three columns).
+
+### 20.4 Summary metrics (exact definitions)
+
+`P` = selected period, `P'` = comparison period (§6.7), filters = location + staff department.
+
+| # | Key | Label | Value | Comparison | Breakdown panels |
+|---|---|---|---|---|---|
+| 1 | `visits` | Visits | count of visits with visit date in P | P' | Visits per month (12 m); office visits by next location level; purpose of visit; by staff department; most active staff (table) |
+| 2 | `officesReached` | Offices reached | distinct offices in office-visit records in P | P' | by office type; by location level; most visited offices (table) |
+| 3 | `activeStaff` | Active staff (foot: "of N") | distinct visit owners in P; N = active non-admin users in filter | P' | by department; active staff per month; staff with no visits (table) |
+| 4 | `visitsMarkedDone` | Visits marked done | % DONE among visits in P whose return date has passed | P' | done % by department; phase of visits; past return date, not done (table) |
+| 5 | `coverage` | Coverage (visited in N days) | % of active branches on track; foot "x of y" | — | coverage by location level (stacked: on track/overdue/never); all branches (table) |
+| 6 | `neverVisited` | Never visited | branches with no visit | — | as 5, filtered |
+| 7 | `overdue` | Overdue (> N days) | branches last visited > N days ago | — | as 5, filtered |
+| 8 | `infoCompleteness` | Info completeness | mean completeness of office visits in P (%) | P' | pass rate of each of the 5 checks; by department; by location; lowest by staff (table) |
+| 9 | `avgRating` | Avg client rating | mean of per-interaction means in P (★, 1 decimal) | P' | by question; distribution 1–5; by location; by department; lowest-rated offices (table) |
+| 10 | `clientInteractions` | Client interactions | submitted interactions on visits in P | P' | per month; by location; by department; rated vs not rated |
+| 11 | `observations` | Observations | submitted observations on visits in P | P' | per month; source (referred by staff vs direct); by location; by department |
+| 12 | `stories` | Stories | submitted stories on visits in P | P' | per month; by department; most engaging (likes + comments, table) |
+| 13 | `actionItemsFiled` | Action items filed | action items submitted in P (lower is better) | P' | per month; by urgency; by status; by unit; by location; by department; list (table) |
+| 14 | `fixRate` | Fix rate | fixed ÷ filed, for items filed in P (%) | P' | by unit; fixed per month; by department; list with days to fix and on-time |
+| 15 | `fixedOnTime` | Fixed on time | % of items fixed in P that were fixed by their latest deadline | P' | as 14 |
+| 16 | `avgDaysToFix` | Avg days to fix | mean days submittedAt → fixedAt for items fixed in P (lower is better) | P' | as 14 |
+| 17 | `waitingForAssignment` | Waiting for assignment | current WAITING items (any filing date) | — | status/unit/location/department splits; list |
+| 18 | `pastDeadline` | Past deadline | current ASSIGNED/IN_PROGRESS items past deadline | — | as 17 |
+| 19 | `longTerm` | Long term | current LONG_TERM items | — | as 17 |
+
+**Needs attention** (current state within the location/department filter; each opens the related
+breakdown): branches never visited; action items past deadline; action items waiting > 2 days;
+branches overdue; visits past return date not marked done; staff with no visits in P; long-term items;
+entries left as drafts on closed visits. Items with a count of 0 are hidden. Not shown on the public
+summary.
+
+**Narrative line** above the tiles: "<Period>: N visits by N staff members to N offices; N action items
+filed and N fixed." plus the comparison note.
+
+### 20.5 Settings (defaults)
+
+| Key | Default | Range / type | Used by |
+|---|---|---|---|
+| `visits.targetDays` | 90 | 7–365 | coverage, overdue |
+| `actionItems.defaultDeadlineDays` | 3 | 1–60 | assign dialog |
+| `actionItems.reminderRule` | 24 h before; 48 h if > 2 days given | json | reminder job |
+| `media.voiceMaxSeconds` | 300 | 30–600 | recorder |
+| `media.photoMaxPx` | 1000 | 600–2000 | photo resize |
+| `media.photoQuality` | 0.72 | 0.5–0.95 | photo resize |
+| `stories.commentMaxLength` | 600 | 100–2000 | comments |
+| `publicSummary.enabled` | true | bool | public page |
+| `publicSummary.days` | 30 | 7–90 | public page |
+| `registration.requiresApproval` | true | bool | registration |
+| `auth.lockoutAttempts` / `auth.lockoutMinutes` | 10 / 15 | int | login |
+
+### 20.6 Reference lists (seed values)
+
+| List | Values |
+|---|---|
+| `visitPurposes` | Onboarding, Monitoring, Training, Action item resolution, Survey, Other (system) |
+| `accommodationTypes` | BRAC Learning Centre (BLC) (system), Hotel, Guest house, BRAC office, Other (system) |
+| `blcs` | BLC Barishal, BLC Chattogram, BLC Cox's Bazar, BLC Faridpur, BLC Jashore, BLC Khulna (Khalishpur), BLC Rajshahi, BLC Sylhet |
+| `urgencies` | Low, Medium, High (system, ranked High → Low) |
+| `designations` | seed from existing users; free text allowed |
+| `staffDepartments` | Microfinance, Health, Nutrition & Population, Education, Technology, Construction, Human Resources, Finance & Accounts, Operations (seed; free text allowed) |
+
+Units and teams seed: Software (IT Support, Application Development, MIS & Data, Network &
+Infrastructure) · Construction (Civil Works, Branch Renovation, Electrical & Utilities, Facilities
+Management) · HR (Recruitment, Payroll & Benefits, Training & Development, Staff Welfare) · Finance
+(Loan Disbursement, Savings & Collections, Accounts & Audit, Insurance Claims) · Operations (Branch
+Operations, Field Supervision, Logistics & Transport, Member Services) · Legal (Loan Recovery Cases,
+Contracts & Compliance, Land & Property). Rating questions seed: Staff behaviour; Waiting time; Clear
+information on loans and savings; Cleanliness of the branch.
+
+### 20.7 Email templates (default wording; editable via wording overrides)
+
+- **Assignment** — Subject: `[Field Visit Tracker] New action item assigned: {code}`. Body: "Hello
+  {name}, a new action item has been assigned to the {unit} unit's fixers ({fixerNames}). Any one of
+  you can resolve it. You have {days} day(s) (deadline: {deadline})." + detail block.
+- **Reminder** — Subject: `[Field Visit Tracker] Reminder — deadline approaching: {code}`. Body:
+  "Hello {name}, the deadline for the action item below is {deadline}." + detail block.
+- **Extension** — Subject: `[Field Visit Tracker] Deadline extended: {code}`. Body: "Hello {name},
+  the deadline for the action item below has been extended by {days} day(s). New deadline:
+  {deadline}." + detail block.
+- **Detail block** — code, title, unit · team, urgency, description, raised by (if consent),
+  office path, filed by/date, visit code/date, link to the action item page.
+
+### 20.8 Error codes (stable; the web maps each to a catalog message)
+
+`AUTH_INVALID_CREDENTIALS`, `AUTH_LOCKED`, `AUTH_PENDING_APPROVAL`, `AUTH_DISABLED`, `PIN_TAKEN`,
+`EMAIL_TAKEN`, `FORBIDDEN`, `FEATURE_DISABLED`, `NOT_FOUND`, `VALIDATION_FAILED`,
+`VISIT_DONE_LOCKED`, `VISIT_DATES_REQUIRED`, `ENTRY_SUBMITTED_LOCKED`, `OFFICE_RULE_VIOLATION`,
+`ACTION_ITEM_TRANSITION_INVALID`, `ACTION_ITEM_NOT_UNIT_FIXER`, `UNIT_HAS_NO_FIXERS`,
+`MEDIA_TOO_LARGE`, `MEDIA_TYPE_NOT_ALLOWED`, `SYNC_SCHEMA_UNSUPPORTED`, `RATE_LIMITED`,
+`QUESTION_HAS_ANSWERS`, `OFFICE_HAS_HISTORY`.
+
+### 20.9 Empty, loading, error and offline states (every list and page)
+- Loading: skeletons matching the final layout (no spinners on full pages).
+- Empty: one sentence saying what will appear and, where relevant, the action to create it
+  ("No visits registered yet." + "Register a visit").
+- Error: one sentence + "Try again"; never raw error text.
+- Offline: pages that need the server show "No connection. This needs the internet; your saved work
+  is safe on this device."
+
