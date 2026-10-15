@@ -89,7 +89,8 @@ staff app must work without signal and sync later.
 | Errors / monitoring | **Sentry** (web + api), uptime check on `/health` | Know when it breaks |
 | Charts / maps | Port the prototype's **dependency-free SVG charts** and **d3-geo** map with the bundled GeoJSON | Already built, offline-capable, no map tiles |
 | Testing | **Vitest** (shared + web units), **Jest + Supertest** (Nest e2e against a test Postgres), **Playwright** (browser e2e, incl. mobile viewport and offline mode) | Confidence for go-live |
-| Containers | **Docker** (multi-stage) for web and api; **docker compose** for local dev (postgres, minio, mailpit) | Same build everywhere |
+| Containers | **Docker** (multi-stage) for web and api — **production and CI only** | Same build on servers |
+| Local development | **No Docker, no admin rights:** `embedded-postgres` (npm), local-disk storage driver, log email driver (see BUILD_PLAN §3.4) | The owner's PC has no admin access |
 | CI/CD | **GitHub Actions**: lint → typecheck → test → build images → migrate → deploy | Repeatable releases |
 | Reverse proxy (self-host) | **Caddy** (automatic HTTPS) | HTTPS is required for camera, microphone and service workers |
 
@@ -639,7 +640,8 @@ object (time range, location, department).
   SMTP provider by a pg-boss worker with retries (exponential backoff, 5 attempts). Every email is
   written to `EmailLog` with status QUEUED → SENT/FAILED; the admin "Sent emails" tab reads it.
 - Sender: a no-reply address on the owner's domain with SPF, DKIM and DMARC configured.
-- In development use **Mailpit** (captures mail locally).
+- In development and CI use the **log mail driver** (`MAIL_DRIVER=log`): emails are written to the log
+  and `EmailLog` and shown in Admin → Sent emails. Staging/production use `MAIL_DRIVER=smtp`.
 
 ---
 
@@ -681,7 +683,7 @@ idempotently (safe to re-run):
 ## 14. Environments, deployment and operations
 
 ### 14.1 Environments
-`local` (docker compose: postgres, minio, mailpit) → `staging` (production-like, seeded demo data)
+`local` (no Docker: embedded Postgres, local storage, log email — BUILD_PLAN §3.4) → `staging` (production-like, seeded demo data)
 → `production`. Each has its own database, bucket, secrets and domain.
 
 ### 14.2 Environment variables (minimum)
@@ -690,6 +692,7 @@ idempotently (safe to re-run):
 DATABASE_URL=postgresql://app:***@db:5432/fvt
 JWT_ACCESS_SECRET=***            JWT_REFRESH_SECRET=***
 COOKIE_DOMAIN=fvt.example.org    APP_ORIGIN=https://fvt.example.org
+STORAGE_DRIVER=local|s3   MAIL_DRIVER=log|smtp
 S3_ENDPOINT=...  S3_REGION=...  S3_BUCKET=...  S3_ACCESS_KEY=***  S3_SECRET_KEY=***
 SMTP_HOST=...  SMTP_PORT=587  SMTP_USER=***  SMTP_PASS=***  MAIL_FROM="Field Visit Tracker <no-reply@example.org>"
 SENTRY_DSN=...  LOG_LEVEL=info  TZ_DISPLAY=Asia/Dhaka
@@ -708,7 +711,7 @@ API_INTERNAL_URL=http://api:4000   NEXT_PUBLIC_SENTRY_DSN=...   NEXT_PUBLIC_APP_
 
 ### 14.4 CI/CD (GitHub Actions)
 On PR: install → lint → typecheck → unit tests → API e2e (Postgres service container) →
-Playwright e2e (against docker compose) → build. On merge to `main`: build and push images →
+Playwright e2e (api + web started with local drivers) → build. On merge to `main`: build and push images →
 deploy to staging → `prisma migrate deploy` → smoke tests → manual approval → production.
 Migrations must be backward compatible for one release (expand → migrate → contract).
 
@@ -742,14 +745,14 @@ Minimum automated coverage before go-live:
 
 | # | Phase | Done when |
 |---|---|---|
-| 1 | **Foundation:** extension points from §18 (permissions + scopes, reference lists, entry-type registry, `/api/v1` + `schemaVersion` upgraders, domain events + outbox, feature flags, metric registry skeleton), monorepo, TS configs, lint, docker compose (postgres, minio, mailpit), Prisma schema + first migration, seed, Nest skeleton with health, Next skeleton, CI pipeline | `pnpm dev` runs web + api; CI green; `/api/health` ok |
+| 1 | **Foundation:** extension points from §18 (permissions + scopes, reference lists, entry-type registry, `/api/v1` + `schemaVersion` upgraders, domain events + outbox, feature flags, metric registry skeleton), monorepo, TS configs, lint, local services without Docker (embedded Postgres, local storage, log email), Prisma schema + first migration, seed, Nest skeleton with health, Next skeleton, CI pipeline | `pnpm dev` runs web + api; CI green; `/api/health` ok |
 | 2 | **Design system + shell:** port `brac.css`, AppShell (sidebar/bottom bar), theme toggle, charts, map, Portal/dialog, toast | Static pages match prototype screenshots at 375/1280 px |
 | 3 | **Auth & users:** login (PIN visible), register, refresh/logout, guards, roles, admin employee/admin-account management, approval flow | Auth e2e passes |
 | 4 | **Reference data & admin setup:** units/teams, offices (+ RO/AO generation, CSV import/export, retire), rating questions, settings | Admin can configure everything; `/reference` cached |
 | 5 | **Visits online:** register/change/delete/mark done, office selectors, stays, visit page with framed records panel | Visit flows pass e2e (online) |
 | 6 | **Entries + media:** four entry forms and views, drafts/submit, photo and voice via presigned uploads, rating snapshots | Entry e2e passes |
 | 7 | **Offline:** service worker, Dexie cache/outbox, media queue, aggregate sync endpoint with merge rules, sync pill | Offline Playwright test passes |
-| 8 | **Action item workflow:** my action items (grouped/filter/search), action item page, queue, admin center, transitions, deadlines, reminders (pg-boss), emails (Mailpit), email log | Workflow e2e incl. fake-clock reminder passes |
+| 8 | **Action item workflow:** my action items (grouped/filter/search), action item page, queue, admin center, transitions, deadlines, reminders (pg-boss), emails (log driver), email log | Workflow e2e incl. fake-clock reminder passes |
 | 9 | **Stories:** feed, likes, comments, WhatsApp share, deep link through sign-in | Story e2e passes |
 | 10 | **Management & analytics:** SQL aggregation endpoints, Summary (filters, tiles, drill-downs, needs attention), Offices, People/profile, Analytics, Branch 360°, public summary | Numbers match the prototype on migrated data (±0) |
 | 11 | **Migration:** prototype import script with media upload and reconciliation report | Report matches; spot-check 20 records |

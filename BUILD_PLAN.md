@@ -32,13 +32,14 @@ is the behavioural reference.
 12. [Documentation system](#12-documentation-system)
 13. [Templates](#13-templates)
 14. [Owner touchpoints](#14-owner-touchpoints)
-15. [Kickoff prompt for the new chat](#15-kickoff-prompt-for-the-new-chat)
+15. [Starting the build in Claude Code](#15-starting-the-build-in-claude-code)
 16. [Readable code standard (mandatory)](#16-readable-code-standard-mandatory)
 
 ---
 
 ## 1. Working agreement for the AI
 
+0. **No admin rights, no Docker on this PC.** Follow §3.4 for local development.
 1. **Read first, in this order:** this file → `GO_LIVE_BUILD_SPEC.md` → the prototype's `README.md` →
    the prototype source files listed in spec §0. Run the prototype locally and click every screen.
 2. **Ask the owner the decisions in spec §19 before Phase 1** (one message, with the defaults).
@@ -88,11 +89,9 @@ These are mandatory. They are what make the system easy to **edit, add to and de
 ### 3.1 Repositories
 - **Reference (read-only):** `Field-Visit-Go-Live` — the prototype and the two plan documents. Do not
   modify its `main` branch; a hosting service may deploy it.
-- **Production code:** a **new repository** named `field-visit-platform` (the owner creates it empty
-  on GitHub and gives the AI push access). Copy `BUILD_PLAN.md` and `GO_LIVE_BUILD_SPEC.md` into its
-  `docs/` folder in the first PR.
-  - *Fallback if no new repository is available:* build inside a `platform/` folder on a branch named
-    `platform` in the reference repository; never merge it into that repository's `main`.
+- **Production code:** **https://github.com/ayazelahimullick12-droid/Go-Live-FV** (private, created
+  empty by the owner). Clone it into the owner's working folder. Copy `BUILD_PLAN.md` and
+  `GO_LIVE_BUILD_SPEC.md` into its `docs/` folder in the first PR, and create `CLAUDE.md` (§13.5).
 
 ### 3.2 Branching
 - Trunk-based: short-lived branches `feat/<phase>-<topic>`, `fix/<topic>`, `chore/<topic>`, merged to
@@ -103,10 +102,32 @@ These are mandatory. They are what make the system easy to **edit, add to and de
 
 | Env | Purpose | Data | Deploys |
 |---|---|---|---|
-| local | Development | Seed + demo data | `pnpm dev` with docker compose |
+| local | Development | Seed + demo data | `pnpm dev` (embedded Postgres, local storage, log email; §3.4) |
 | ci | Automated tests | Throwaway | Every PR |
 | staging | Owner review, UAT, rehearsals | Seed + anonymised copy of production (optional) | Every merge to `main` |
 | production | Live | Real | Tagged releases, manual approval |
+
+### 3.4 Local development without Docker or admin rights (mandatory)
+The owner's PC has **no admin rights and no Docker**. Local development must work with only Git,
+Node.js (already installed) and pnpm (`npm install -g pnpm`, installs into the user profile).
+
+| Service | Local development (this PC) | CI (GitHub Actions) | Staging / production |
+|---|---|---|---|
+| PostgreSQL | **`embedded-postgres`** npm package started by `pnpm db:start` (data in `.local/pg`, git-ignored), or a free hosted Neon database via `DATABASE_URL` | Postgres service container | Managed or self-hosted Postgres |
+| File storage | **`STORAGE_DRIVER=local`**: files under `.local/storage`, served by the API with signed, expiring URLs | `local` | **`STORAGE_DRIVER=s3`** (S3 / R2 / MinIO) |
+| Email | **`MAIL_DRIVER=log`**: rendered email written to the log and `EmailLog` (visible in Admin → Sent emails) | `log` | **`MAIL_DRIVER=smtp`** |
+| Background jobs | pg-boss on the same Postgres | same | same |
+| Browsers for Playwright | `pnpm exec playwright install chromium` (user profile) | installed by the workflow | — |
+
+Rules:
+- `pnpm dev` starts embedded Postgres (if `DATABASE_URL` is not set), applies migrations, seeds, and
+  starts api + web. `pnpm test` starts its own throwaway embedded Postgres per run.
+- Drivers are chosen only by environment variables; staging and production switch to S3 and SMTP
+  **without code changes**. Each driver implements one small interface (`StorageDriver`,
+  `MailDriver`) with a contract test that runs against every implementation.
+- Never require admin rights, global system installs, Windows services or Docker on the development PC.
+  Docker may be used only inside GitHub Actions and on the production server.
+- Everything machine-specific lives in git-ignored `.local/` and `.env` files.
 
 ---
 
@@ -143,7 +164,10 @@ Rules:
 ## 5. Repository skeleton (exact)
 
 ```
-field-visit-platform/
+Go-Live-FV/
+├─ CLAUDE.md                 rules every AI session loads automatically (§13.5)
+├─ .claude/settings.json      Claude Code permissions for this project (§15)
+├─ .local/                    git-ignored: embedded Postgres data, local file storage
 ├─ apps/
 │  ├─ api/
 │  │  ├─ src/
@@ -161,8 +185,10 @@ field-visit-platform/
 │  │  │  │  ├─ events/                  EventBus, Outbox writer, relay worker
 │  │  │  │  ├─ jobs/                    pg-boss module, job registry
 │  │  │  │  ├─ audit/                   AuditService, interceptor
-│  │  │  │  ├─ media/                   presign, complete, signed GET, orphan cleanup job
-│  │  │  │  ├─ notifications/           Notifier, channels (email now), templates registry
+│  │  │  │  ├─ media/                   presign, complete, signed GET, orphan cleanup job;
+│  │  │  │                           drivers/local.ts, drivers/s3.ts (STORAGE_DRIVER)
+│  │  │  │  ├─ notifications/           Notifier, channels (email now), templates registry;
+│  │  │  │                           mail drivers log.ts, smtp.ts (MAIL_DRIVER)
 │  │  │  │  ├─ sync/                    schemaVersion upgraders, idempotency store
 │  │  │  │  └─ health/                  /health, /version
 │  │  │  └─ features/
@@ -222,8 +248,10 @@ field-visit-platform/
 │  │     ├─ features/<feature>/  schemas.ts, rules.ts, constants.ts, events.ts
 │  │     └─ lib/              dates (Asia/Dhaka), codes, ids (uuidv7), office lists, money/number fmt
 │  └─ config/    eslint, tsconfig, prettier, vitest presets
-├─ infra/        docker-compose.yml, docker-compose.prod.yml, Caddyfile, backup scripts
-├─ scripts/      migrate-from-prototype.ts, generate-api-client.ts, new-feature.ts (scaffolder)
+├─ infra/        production only: Dockerfiles, docker-compose.prod.yml, Caddyfile, backup scripts
+│                (never needed on the development PC)
+├─ scripts/      dev-db.ts (embedded Postgres start/stop/reset), migrate-from-prototype.ts,
+│                generate-api-client.ts, new-feature.ts (scaffolder)
 ├─ docs/
 │  ├─ BUILD_PLAN.md  GO_LIVE_BUILD_SPEC.md
 │  ├─ features/      one .md per feature (template §13.1)
@@ -464,23 +492,24 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 **Goal:** agree decisions and accounts before code.
 - [ ] Read the documents and run the prototype; list any contradictions found.
 - [ ] Ask the owner the spec §19 decisions in one message with defaults; record in `DECISIONS.md`.
-- [ ] Confirm repository (new `field-visit-platform`, §3.1) and access.
+- [ ] Clone https://github.com/ayazelahimullick12-droid/Go-Live-FV into the working folder; confirm push access.
+- [ ] Create `CLAUDE.md` (§13.5) and commit it with the docs (first commit).
 - [ ] List accounts the owner must create (hosting, domain, email provider, Sentry, object storage)
       with what is needed from each (keys, DNS records). Do not block Phase 1 on them; use local
-      substitutes (MinIO, Mailpit) until available.
+      drivers (§3.4: embedded Postgres, local storage, log email) until available.
 **Acceptance:** `DECISIONS.md` filled; repository accessible; owner says "go".
 
 ### Phase 1 — Repository foundation
 **Goal:** a monorepo that builds, tests and runs locally and in CI.
 - [ ] pnpm workspace + Turborepo; `apps/api` (NestJS), `apps/web` (Next.js App Router), `packages/shared`, `packages/config`.
 - [ ] TypeScript strict; ESLint (incl. boundary rules §4 and no-hardcoded-strings rule for web), Prettier, Husky + lint-staged, commitlint.
-- [ ] `infra/docker-compose.yml`: postgres 16+, minio (+ bucket bootstrap), mailpit.
+- [ ] Local services without Docker (§3.4): `embedded-postgres` via `scripts/dev-db.ts` (`pnpm db:start | db:stop | db:reset`), `.local/` git-ignored, `DATABASE_URL` override for Neon.
 - [ ] Vitest (shared, web), Jest + Supertest (api) with a disposable test database per run, Playwright skeleton.
-- [ ] GitHub Actions `ci.yml`: install → lint → typecheck → unit → api e2e (postgres service) → build → Playwright (compose).
+- [ ] GitHub Actions `ci.yml`: install → lint → typecheck → unit → api e2e (Postgres service container) → build → Playwright (starts api + web with local drivers).
 - [ ] `.env.example` for api and web; typed config loader (zod) failing fast on missing vars.
 - [ ] `scripts/new-feature.ts` scaffolder (§5).
 - [ ] Docs: copy plan + spec into `docs/`; create `DECISIONS.md`, `PROGRESS.md`, `CHANGELOG.md`, ADR template, feature template, PR template.
-**Acceptance:** `pnpm i && pnpm dev` starts web + api against compose; CI green on an empty feature; scaffolder creates a feature that passes lint/tests.
+**Acceptance:** on a PC **without admin rights or Docker**, `pnpm i && pnpm dev` starts embedded Postgres, migrates, seeds and runs web + api; `pnpm test` passes using its own embedded Postgres; CI green on an empty feature; scaffolder creates a feature that passes lint/tests.
 **Change hooks:** boundaries enforced from day one; scaffolder gives every future feature the same shape.
 
 ### Phase 2 — Platform core (the extension points)
@@ -492,13 +521,13 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 - [ ] `core/settings`, `core/reference-lists`, `core/flags`, `core/messages` services + admin endpoints + caching (in-memory with change notification via Postgres `LISTEN/NOTIFY`).
 - [ ] `core/events`: typed EventBus, transactional Outbox, relay worker (pg-boss) with retries; `core/jobs` (pg-boss module, job registry, scheduling API).
 - [ ] `core/audit`: service + interceptor writing who/what/when for mutating requests.
-- [ ] `core/media`: presign (MIME/size allow-list from settings), complete, signed GET, orphan cleanup job.
-- [ ] `core/notifications`: Notifier + email channel (Nodemailer) + template rendering from messages; EmailLog statuses; dev uses Mailpit.
+- [ ] `core/media`: `StorageDriver` interface with `local` and `s3` drivers (+ shared contract test); presign (MIME/size allow-list from settings), complete, signed GET, orphan cleanup job.
+- [ ] `core/notifications`: Notifier + email channel (Nodemailer) + template rendering from messages; EmailLog statuses; `MailDriver` interface with `log` (dev/CI) and `smtp` (staging/production) drivers.
 - [ ] `core/sync`: idempotency middleware (`Idempotency-Key`), `schemaVersion` upgrader registry.
 - [ ] OpenAPI generation + `pnpm gen:api` producing the web client; CI check that it is up to date.
 - [ ] Seed `reference.ts` (roles, permissions, settings defaults, lists from the prototype, flags — including `management.offices`, `management.people`, `management.analytics`, all **off**; spec §20.1).
 - [ ] ESLint readability rules and limits from §16.2 active in CI from this phase on.
-**Acceptance:** e2e tests prove: a permission-protected test endpoint returns 403/200 correctly; a setting change is audited and visible without restart; an event written in a transaction is delivered exactly once to a listener (also after a forced crash before relay); a flag hides a test endpoint; media presign/upload/get works against MinIO.
+**Acceptance:** e2e tests prove: a permission-protected test endpoint returns 403/200 correctly; a setting change is audited and visible without restart; an event written in a transaction is delivered exactly once to a listener (also after a forced crash before relay); a flag hides a test endpoint; media presign/upload/get works with the local driver (and the s3 driver passes the same contract test when credentials are configured).
 **Change hooks:** every later feature plugs into these; most post-go-live edits become data changes.
 
 ### Phase 3 — Authentication and users (Owner review)
@@ -570,7 +599,7 @@ makes later edits easy). Tasks are written as checkboxes to copy into `PROGRESS.
 - [ ] Reminder job: schedule on assign/extend per `actionItems.reminderRule`; cancel on Long Term/Fixed; 5-minute safety sweep.
 - [ ] Notifications registry entries (§7.9); email templates; EmailLog.
 - [ ] Web: **My action items** (search, status chips with counts, groups Drafts · Waiting · Assigned · In progress · Long term · Fixed, fixed preview 6 + Show all, tiles = code, status, title, first 100 words); **Action item page** (all details, transition buttons from the registry, dialogs for fix note/photo and long-term reason); **Action item queue** (unit title, teammates, score cards, groups, past-deadline first); **Admin action items center** (sections, assign with fixer-pool preview, extend, journey strip).
-**Acceptance:** spec §6.5 and §15 workflow tests with a fake clock (reminder at 24 h/48 h; none for Long Term); only unit fixers can transition; emails visible in Mailpit and the Sent emails tab.
+**Acceptance:** spec §6.5 and §15 workflow tests with a fake clock (reminder at 24 h/48 h; none for Long Term); only unit fixers can transition; emails visible in the log and the Sent emails tab (log driver).
 **Change hooks:** statuses/transitions/notifications are registry edits (§9.6); reminder timing is a setting.
 
 ### Phase 10 — Stories
@@ -793,6 +822,35 @@ Date: YYYY-MM-DD   Status: proposed | accepted | superseded by NNNN
 - [ ] `CHECK` constraints for registry-backed columns regenerated.
 - [ ] Tested against a copy of production-size data on staging.
 
+### 13.5 `CLAUDE.md` (repository root — loaded automatically by every Claude Code session)
+```md
+# Field Visit Tracker — production build
+
+Read before doing anything: docs/BUILD_PLAN.md (process, structure, rules), docs/GO_LIVE_BUILD_SPEC.md
+(requirements), PROGRESS.md (where we are), DECISIONS.md (owner answers and choices).
+Behavioural reference (read-only, never push): https://github.com/ayazelahimullick12-droid/Field-Visit-Go-Live
+
+## Non-negotiables
+- Work phase by phase (BUILD_PLAN §8); stop at "Owner review" phases.
+- This PC has no admin rights and no Docker: embedded Postgres, STORAGE_DRIVER=local, MAIL_DRIVER=log (§3.4).
+- Changeability principles (§2): business-changeable things are data; one feature = one folder per layer;
+  registries are the single source of truth; new features behind flags; expand → migrate → contract.
+- Readable code standard (§16): plain names from the glossary, functions ≤ 40 lines, ≤ 3 params,
+  ≤ 3 nesting levels, JSDoc on exports, UI text via t('key'), errors via codes.
+- Every PR: tests + docs + CHANGELOG; CI green; checklist §10.1 and §16.12.
+- Never commit secrets or real personal data. Never force-push.
+
+## Commands
+pnpm dev        start embedded Postgres, migrate, seed, run api + web
+pnpm test       unit + e2e (own throwaway database)
+pnpm lint       lint + typecheck
+pnpm db:reset   wipe and reseed the local database
+pnpm gen:api    regenerate the typed API client
+
+## End of every session
+Update PROGRESS.md (done / next / open questions) and DECISIONS.md, commit, push.
+```
+
 ---
 
 ## 14. Owner touchpoints
@@ -807,29 +865,74 @@ Date: YYYY-MM-DD   Status: proposed | accepted | superseded by NNNN
 
 ---
 
-## 15. Kickoff prompt for the new chat
+## 15. Starting the build in Claude Code
 
-Paste this into the new chat (replace the bracketed parts):
+### 15.1 What the owner does (once)
+1. On the PC: `npm install -g pnpm` (no admin needed). Git and Node.js are already installed and Git is
+   signed in to GitHub. **No Docker, no admin rights needed** (§3.4).
+2. On GitHub: make sure **Go-Live-FV** is **Private** and empty.
+3. In the Claude Code app: model **Opus**; permission mode **Accept edits**; Settings → Claude Code →
+   prompt suggestions **off**, flash taskbar on notifications **on**, keep awake **on**.
+4. Open Claude Code in an **empty folder** and send the **setup prompt** (§15.2). Approve the file it
+   creates, type `/exit`, then open a **new chat in the same folder** and send the **kickoff prompt**
+   (§15.3).
 
+### 15.2 Setup prompt (first chat, creates the permissions file)
+```text
+Create .claude/settings.json in this folder with exactly this content, then stop:
+
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(pnpm:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)",
+      "Bash(git commit:*)", "Bash(git push:*)", "Bash(git pull:*)", "Bash(git fetch:*)",
+      "Bash(git clone:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git branch:*)",
+      "Bash(git merge:*)", "Bash(git stash:*)", "Bash(git restore:*)", "Bash(git mv:*)",
+      "WebFetch(domain:github.com)", "WebFetch(domain:raw.githubusercontent.com)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)", "Bash(git push -f:*)",
+      "Read(./.env)", "Read(./**/.env)"
+    ]
+  }
+}
 ```
+
+### 15.3 Kickoff prompt (new chat in the same folder)
+```text
 You are building the production version of the Field Visit Tracker.
 
-Reference repository (prototype + plans):
+Reference repository (prototype + plans, read-only):
 https://github.com/ayazelahimullick12-droid/Field-Visit-Go-Live
 Read, in order: BUILD_PLAN.md, GO_LIVE_BUILD_SPEC.md, README.md, then the prototype source.
+Never push to that repository; a hosting service may deploy from its main branch.
 
-Production repository: [https://github.com/<owner>/field-visit-platform]  (empty; you have push access)
+Production repository (private, empty; build everything here):
+https://github.com/ayazelahimullick12-droid/Go-Live-FV
+Clone it into this folder (the folder already contains .claude/settings.json; keep it).
 
 Rules:
-- Follow BUILD_PLAN.md exactly: phases in order, the changeability principles (§2), the repository
-  skeleton (§5), the registries (§7), the quality gates (§10) and the readable code standard (§16).
+- Follow BUILD_PLAN.md exactly: phases in order, the changeability principles (§2), local development
+  without Docker or admin rights (§3.4), the repository skeleton (§5), the registries (§7), the quality
+  gates (§10) and the readable code standard (§16).
 - At launch the Management section shows only Summary; Offices, People and Analytics are admin
   switches (spec §20.1).
-- Start with Phase 0: ask me the decisions in GO_LIVE_BUILD_SPEC.md §19 in one message, with the
-  defaults, and list the accounts I need to create. Do not write code until I answer.
-- Keep PROGRESS.md and DECISIONS.md up to date so work can resume in a new chat.
-- Stop for my review at the end of every phase marked "Owner review".
+- First commit: docs/BUILD_PLAN.md, docs/GO_LIVE_BUILD_SPEC.md, CLAUDE.md (template in BUILD_PLAN
+  §13.5), PROGRESS.md, DECISIONS.md, .gitignore (including .local/ and .env).
+- Then Phase 0: ask me the decisions in GO_LIVE_BUILD_SPEC.md §19 in one message, with the defaults,
+  and list anything else I need. Do not write application code until I answer.
+- Keep PROGRESS.md and DECISIONS.md up to date and push at the end of every work session.
+- Stop for my review at the end of every phase marked "Owner review", and tell me exactly how to
+  open the app to check it.
 - Never commit secrets or real personal data.
+```
+
+### 15.4 Resume prompt (every later chat, same folder)
+```text
+Resume the Field Visit Tracker build. Read CLAUDE.md, then PROGRESS.md and DECISIONS.md, pull the
+latest from Go-Live-FV, tell me in three lines where we are and what is next, then continue.
 ```
 
 ---
